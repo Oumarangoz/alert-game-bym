@@ -224,6 +224,7 @@ class BubbleOverlayService : Service() {
             // Referanslari loop basinda bir kez yukle
             val cachedRef1 = ReferenceStore.get(this@BubbleOverlayService, ReferenceStore.KEY_STATE1)
             val cachedRef2 = ReferenceStore.get(this@BubbleOverlayService, ReferenceStore.KEY_STATE2)
+            AppLog.add("DEBUG: ref1=${cachedRef1 != null} ref2=${cachedRef2 != null}")
             AppLog.add("AUTO: loop başladı")
             AppLog.add("AUTO: ITEM-LIST -> ${items.size} kayıt")
             AppLog.add("AUTO: IKON ROI x=${ControlCenter.targetX.value.toInt()} y=${ControlCenter.targetY.value.toInt()} r=${ICON_RADIUS_X}x${ICON_RADIUS_Y} | ITEM ROI x1=${ControlCenter.itemRoiX1.value.toInt()} y1=${ControlCenter.itemRoiY1.value.toInt()} x2=${ControlCenter.itemRoiX2.value.toInt()} y2=${ControlCenter.itemRoiY2.value.toInt()}")
