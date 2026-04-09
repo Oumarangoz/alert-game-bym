@@ -73,6 +73,7 @@ class BubbleOverlayService : Service() {
     @Volatile private var autoPhase = AutoPhase.WAIT_FOR_ITEM
     @Volatile private var itemMissCount = 0
     @Volatile private var state2MissCount = 0
+    @Volatile private var itemWaitStartedAt = 0L
 
  // Phase bazli antispam - STATE1/STATE2 birbirini engellemez
  private val phaseTapX = java.util.concurrent.ConcurrentHashMap<String, Float>()
@@ -128,6 +129,7 @@ class BubbleOverlayService : Service() {
         autoPhase = AutoPhase.WAIT_FOR_ITEM
         itemMissCount = 0
         state2MissCount = 0
+        itemWaitStartedAt = 0L
   clearTapLocks()
         if (log) AppLog.add("AUTO: state sıfırlandı")
     }
