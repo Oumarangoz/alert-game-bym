@@ -262,28 +262,9 @@ class BubbleOverlayService : Service() {
                             AppLog.add("DEBUG: kirmizi yok, ref1=${ref1 != null} roiX=$roiX roiY=$roiY")
                             delay(400) // CPU yormasin
                         } else {
-                            // Kirmizi var - item dusmus mu bak
-                            val x1 = ControlCenter.itemRoiX1.value.toInt()
-                            val y1 = ControlCenter.itemRoiY1.value.toInt()
-                            val x2 = ControlCenter.itemRoiX2.value.toInt()
-                            val y2 = ControlCenter.itemRoiY2.value.toInt()
-
-                            withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }
-                            delay(200)
-                            val lines = withContext(Dispatchers.IO) {
-                                OcrDebugScanner.scanRegion(this@BubbleOverlayService, x1, y1, x2, y2)
-                            }
-                            withContext(Dispatchers.Main) { restoreTransientOverlaysKeepBubble(); refreshBubble() }
-                            val itemFound = lines.any { line ->
-                                items.any { q -> line.text.lowercase().contains(q.lowercase()) }
-                            }
-
-                            if (itemFound) {
-                                AppLog.add("AUTO: KIRMIZI var + ITEM dusmus -> kirmiziya tikliyorum")
-                                autoPhase = AutoPhase.TAP_RED
-                            } else {
-                                delay(300)
-                            }
+                            // Kirmizi var - direkt tikla
+                            AppLog.add("AUTO: KIRMIZI bulundu -> tikliyorum")
+                            autoPhase = AutoPhase.TAP_RED
                         }
                     }
 
