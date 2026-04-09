@@ -257,6 +257,7 @@ class BubbleOverlayService : Service() {
                         } else false
 
                         if (!kirmizi) {
+                            AppLog.add("DEBUG: kirmizi yok, ref1=${ref1 != null} roiX=$roiX roiY=$roiY")
                             delay(400) // CPU yormasin
                         } else {
                             // Kirmizi var - item dusmus mu bak
