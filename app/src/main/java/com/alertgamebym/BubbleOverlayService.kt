@@ -256,8 +256,6 @@ class BubbleOverlayService : Service() {
                         val roiY = ControlCenter.targetY.value.toInt()
 
                         val kirmizi = if (ref1 != null) {
-                            withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }
-                            delay(120)
                             val m = withContext(Dispatchers.Default) {
                                 ImageTemplateScanner.findBestMatch(
                                     context = this@BubbleOverlayService,
@@ -268,7 +266,6 @@ class BubbleOverlayService : Service() {
                                     fullScreen = false
                                 )
                             }
-                            withContext(Dispatchers.Main) { restoreTransientOverlaysKeepBubble(); refreshBubble() }
                             m != null && m.confidence >= minConf
                         } else false
 
@@ -280,13 +277,9 @@ class BubbleOverlayService : Service() {
                             val x2 = ControlCenter.itemRoiX2.value.toInt()
                             val y2 = ControlCenter.itemRoiY2.value.toInt()
 
-                            withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }
-                            delay(250)
                             val lines = withContext(Dispatchers.IO) {
                                 OcrDebugScanner.scanRegion(this@BubbleOverlayService, x1, y1, x2, y2)
                             }
-                            withContext(Dispatchers.Main) { restoreTransientOverlaysKeepBubble(); refreshBubble() }
-
                             val itemFound = lines.any { line ->
                                 items.any { q -> line.text.lowercase().contains(q.lowercase()) }
                             }
