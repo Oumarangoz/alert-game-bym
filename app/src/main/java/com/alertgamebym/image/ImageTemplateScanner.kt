@@ -57,6 +57,8 @@ object ImageTemplateScanner {
             screen.recycle()
             return null
         }
+        var screenScaledRef: Bitmap? = null
+        var templateBaseRef: Bitmap? = null
 
         // Ekrani 720px genislige scale et (540 yerine - daha fazla detay)
         val factor = min(1f, 720f / screen.width.toFloat())
@@ -67,7 +69,7 @@ object ImageTemplateScanner {
                 max((screen.width * factor).toInt(), 1),
                 max((screen.height * factor).toInt(), 1),
                 true
-            )
+            ).also { screenScaledRef = it }
         } else screen
 
         val templateBase = if (factor < 1f) {
@@ -76,7 +78,7 @@ object ImageTemplateScanner {
                 max((templateOriginal.width * factor).toInt(), 12),
                 max((templateOriginal.height * factor).toInt(), 12),
                 true
-            )
+            ).also { templateBaseRef = it }
         } else templateOriginal
 
         val screenGray = toGray(screenScaled)
@@ -161,10 +163,11 @@ object ImageTemplateScanner {
             if (tpl !== templateBase) tpl.recycle()
         }
 
-        if (screenScaled !== screen) screenScaled.recycle()
-        screen.recycle()
-        if (templateBase !== templateOriginal) templateBase.recycle()
-        templateOriginal.recycle()
+        // Normal recycle
+        if (screenScaled !== screen) screenScaledRef?.recycle()
+        runCatching { screen.recycle() }
+        if (templateBase !== templateOriginal) templateBaseRef?.recycle()
+        runCatching { templateOriginal.recycle() }
 
         return best
     }

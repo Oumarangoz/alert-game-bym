@@ -66,9 +66,9 @@ class BubbleOverlayService : Service() {
         FIND_STATE2
     }
 
-    private var autoPhase = AutoPhase.WAIT_FOR_ITEM
-    private var itemMissCount = 0
-    private var state2MissCount = 0
+    @Volatile private var autoPhase = AutoPhase.WAIT_FOR_ITEM
+    @Volatile private var itemMissCount = 0
+    @Volatile private var state2MissCount = 0
 
  // Phase bazli antispam - STATE1/STATE2 birbirini engellemez
  private val phaseTapX = mutableMapOf<String, Float>()
@@ -510,6 +510,8 @@ class BubbleOverlayService : Service() {
                     val tx = lp.x + 60f
                     val ty = lp.y + 60f
                     ControlCenter.setTarget(tx, ty)
+                    getSharedPreferences("overlay_pos", MODE_PRIVATE).edit()
+                        .putFloat("target_x", tx).putFloat("target_y", ty).apply()
                     AppLog.add("TARGET: x=${tx.toInt()} y=${ty.toInt()}")
                     true
                 }
@@ -518,6 +520,13 @@ class BubbleOverlayService : Service() {
             }
         }
 
+        // Kayitli pozisyon yukle
+        val savedTx = getSharedPreferences("overlay_pos", MODE_PRIVATE).getFloat("target_x", -1f)
+        val savedTy = getSharedPreferences("overlay_pos", MODE_PRIVATE).getFloat("target_y", -1f)
+        if (savedTx > 0 && savedTy > 0) {
+            lp.x = (savedTx - 60f).toInt()
+            lp.y = (savedTy - 60f).toInt()
+        }
         runCatching {
             windowManager.addView(tv, lp)
             targetView = tv
@@ -600,11 +609,13 @@ class BubbleOverlayService : Service() {
             drawView.postInvalidate()
         }
 
-        // Baslangic ROI ayarla
-        ControlCenter.setItemRoi(
-            initX1.toFloat(), initY1.toFloat(),
-            initX2.toFloat(), initY2.toFloat()
-        )
+        // Kayitli ROI pozisyon yukle
+        val roiPrefs = getSharedPreferences("overlay_pos", MODE_PRIVATE)
+        val rx1 = roiPrefs.getFloat("roi_x1", initX1.toFloat())
+        val ry1 = roiPrefs.getFloat("roi_y1", initY1.toFloat())
+        val rx2 = roiPrefs.getFloat("roi_x2", initX2.toFloat())
+        val ry2 = roiPrefs.getFloat("roi_y2", initY2.toFloat())
+        ControlCenter.setItemRoi(rx1, ry1, rx2, ry2)
 
         runCatching {
             windowManager.addView(drawView, drawLp)
@@ -672,6 +683,11 @@ class BubbleOverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     onMoved(lp.x + half.toFloat(), lp.y + half.toFloat())
+                    getSharedPreferences("overlay_pos", MODE_PRIVATE).edit()
+                        .putFloat("roi_x1", ControlCenter.itemRoiX1.value)
+                        .putFloat("roi_y1", ControlCenter.itemRoiY1.value)
+                        .putFloat("roi_x2", ControlCenter.itemRoiX2.value)
+                        .putFloat("roi_y2", ControlCenter.itemRoiY2.value).apply()
                     AppLog.add("ROI: x1=${ControlCenter.itemRoiX1.value.toInt()}" +
                         " y1=${ControlCenter.itemRoiY1.value.toInt()}" +
                         " x2=${ControlCenter.itemRoiX2.value.toInt()}" +

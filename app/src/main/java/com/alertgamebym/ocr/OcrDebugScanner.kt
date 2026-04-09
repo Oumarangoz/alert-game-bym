@@ -90,17 +90,19 @@ object OcrDebugScanner {
             cachedH = screenH
         }
 
+        var fullBitmap: Bitmap? = null
+        var cropped: Bitmap? = null
+        var enhanced: Bitmap? = null
         return try {
-            val fullBitmap = captureBitmap(reader!!, screenW, screenH)
-            val cropped = Bitmap.createBitmap(fullBitmap, left, top, right - left, bottom - top)
-            fullBitmap.recycle()
+            fullBitmap = captureBitmap(reader!!, screenW, screenH)
+            cropped = Bitmap.createBitmap(fullBitmap, left, top, right - left, bottom - top)
+            fullBitmap.recycle(); fullBitmap = null
 
-            // Gri ton + kontrast artisi - OCR dogrulugunu arttirir
-            val enhanced = toGrayscaleEnhanced(cropped)
-            cropped.recycle()
+            enhanced = toGrayscaleEnhanced(cropped)
+            cropped.recycle(); cropped = null
 
             val result = runRecognition(enhanced)
-            enhanced.recycle()
+            enhanced.recycle(); enhanced = null
 
             result.textBlocks
                 .flatMap { it.lines }
@@ -114,9 +116,14 @@ object OcrDebugScanner {
                 }
                 .sortedWith(compareBy<OcrLine> { it.y }.thenBy { it.x })
         } catch (e: Exception) {
-            // Hata olursa cache temizle, bir sonraki cagride yeniden olustur
+            // Hata olursa cache temizle
             invalidateCache()
             emptyList()
+        } finally {
+            // Exception olsa bile bitmap recycle - memory leak onle
+            runCatching { fullBitmap?.recycle() }
+            runCatching { cropped?.recycle() }
+            runCatching { enhanced?.recycle() }
         }
     }
 
