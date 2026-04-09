@@ -73,27 +73,20 @@ class BubbleOverlayService : Service() {
 
     private var autoPhase = AutoPhase.WAIT_FOR_ITEM
     private var itemMissCount = 0
-    private var itemSeenOnce = false
     private var state1MissCount = 0
     private var state2MissCount = 0
-    private var collectStartedAt = 0L
-    private var autoReturnCountdownStartedAt = 0L
 
  // Phase bazli antispam - STATE1/STATE2 birbirini engellemez
  private val phaseTapX = mutableMapOf<String, Float>()
  private val phaseTapY = mutableMapOf<String, Float>()
  private val phaseTapAt = mutableMapOf<String, Long>()
 
- private val autoStopWaitMs = 5000L
- private val collectTimeoutMs = 30000L
 
     companion object {
         const val CHANNEL_ID = "bubble_overlay_channel"
         const val NOTIF_ID = 3001
 
         const val ACTION_RESET_AUTO = "ACTION_RESET_AUTO"
-        const val ACTION_RESET_TIMER = "ACTION_RESET_TIMER"
-
         const val ICON_MIN_CONF = 0.80f
         const val ICON_RADIUS_X = 85
         const val ICON_RADIUS_Y = 85
@@ -140,17 +133,13 @@ class BubbleOverlayService : Service() {
     private fun resetAutoState(log: Boolean) {
         autoPhase = AutoPhase.WAIT_FOR_ITEM
         itemMissCount = 0
-        itemSeenOnce = false
         state1MissCount = 0
         state2MissCount = 0
-        collectStartedAt = 0L
-  autoReturnCountdownStartedAt = 0L
   clearTapLocks()
         if (log) AppLog.add("AUTO: state sıfırlandı")
     }
 
     private fun resetCollectTimer(log: Boolean) {
-        collectStartedAt = 0L
         itemMissCount = 0
         if (log) AppLog.add("AUTO: süre sayacı sıfırlandı")
     }
