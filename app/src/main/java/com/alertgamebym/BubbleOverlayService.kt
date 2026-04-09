@@ -27,6 +27,7 @@ import com.alertgamebym.ocr.OcrDebugScanner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -55,7 +56,10 @@ class BubbleOverlayService : Service() {
     private var roiHandle2Params: WindowManager.LayoutParams? = null
 
     // Main: UI guncellemeleri, Default: agir isler (bitmap, OCR, template)
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val exceptionHandler = CoroutineExceptionHandler { _, t ->
+        AppLog.add("AUTO: BEKLENMEDIK HATA: ${t.message ?: t.javaClass.simpleName}")
+    }
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob() + exceptionHandler)
     private var autoJob: Job? = null
 
 
@@ -217,6 +221,9 @@ class BubbleOverlayService : Service() {
         resetAutoState(log = false)
 
         autoJob = scope.launch {
+            // Referanslari loop basinda bir kez yukle
+            val cachedRef1 = ReferenceStore.get(this@BubbleOverlayService, ReferenceStore.KEY_STATE1)
+            val cachedRef2 = ReferenceStore.get(this@BubbleOverlayService, ReferenceStore.KEY_STATE2)
             AppLog.add("AUTO: loop başladı")
             AppLog.add("AUTO: ITEM-LIST -> ${items.size} kayıt")
             AppLog.add("AUTO: IKON ROI x=${ControlCenter.targetX.value.toInt()} y=${ControlCenter.targetY.value.toInt()} r=${ICON_RADIUS_X}x${ICON_RADIUS_Y} | ITEM ROI x1=${ControlCenter.itemRoiX1.value.toInt()} y1=${ControlCenter.itemRoiY1.value.toInt()} x2=${ControlCenter.itemRoiX2.value.toInt()} y2=${ControlCenter.itemRoiY2.value.toInt()}")
@@ -227,7 +234,7 @@ class BubbleOverlayService : Service() {
 
                     AutoPhase.WAIT_FOR_ITEM -> {
                         // Kirmizi ikonu kontrol et (tikla degil)
-                        val ref1 = ReferenceStore.get(this@BubbleOverlayService, ReferenceStore.KEY_STATE1)
+                        val ref1 = cachedRef1
                         val roiX = ControlCenter.targetX.value.toInt()
                         val roiY = ControlCenter.targetY.value.toInt()
 
@@ -284,7 +291,8 @@ class BubbleOverlayService : Service() {
                             label = "STATE1",
                             logPrefix = "AUTO-R",
                             silentNoMatch = false,
-                            minConf = minConf
+                            minConf = minConf,
+                            cachedUri = cachedRef1
                         )
                         AppLog.add("AUTO: KIRMIZI tek tikla -> item aranıyor")
                         autoPhase = AutoPhase.TAP_ITEM
@@ -303,8 +311,13 @@ class BubbleOverlayService : Service() {
                         if (foundQuery != null) {
                             AppLog.add("AUTO: ITEM alindi -> '$foundQuery' - 1sn sonra STATE2")
                             delay(1000)
+                            itemMissCount = 0
                             autoPhase = AutoPhase.FIND_STATE2
                         } else {
+                            itemMissCount += 1
+                            if (itemMissCount % 10 == 1) {
+                                AppLog.add("AUTO-I: item bekleniyor (${itemMissCount}. deneme)")
+                            }
                             delay(300)
                         }
                     }
@@ -315,7 +328,8 @@ class BubbleOverlayService : Service() {
                             label = "STATE2",
                             logPrefix = "AUTO-B",
                             silentNoMatch = true,
-                            minConf = minConf
+                            minConf = minConf,
+                            cachedUri = cachedRef2
                         )
                         if (tapped) {
                             AppLog.add("AUTO: KAHVERENGI tiklandi -> ava donuluyor")
@@ -574,7 +588,7 @@ class BubbleOverlayService : Service() {
                 val y1 = ControlCenter.itemRoiY1.value
                 val x2 = ControlCenter.itemRoiX2.value
                 val y2 = ControlCenter.itemRoiY2.value
-                if (x1 == 0f && x2 == 0f) return
+                if (x1 == x2 && y1 == y2) return // ROI boyutu 0, cizme
                 val l = minOf(x1, x2); val t = minOf(y1, y2)
                 val r = maxOf(x1, x2); val b = maxOf(y1, y2)
                 canvas.drawRect(l, t, r, b, dimPaint)
@@ -628,7 +642,7 @@ class BubbleOverlayService : Service() {
             roiHandle2View = h2; roiHandle2Params = lp2
 
             AppLog.add("ROI: dikdortgen eklendi " +
-                "x1=${initX1} y1=${initY1} x2=${initX2} y2=${initY2}")
+                "x1=${rx1.toInt()} y1=${ry1.toInt()} x2=${rx2.toInt()} y2=${ry2.toInt()}")
         }.onFailure {
             AppLog.add("ROI: hata: ${it.message}")
         }
@@ -767,9 +781,10 @@ class BubbleOverlayService : Service() {
         label: String,
         logPrefix: String,
         silentNoMatch: Boolean,
-        minConf: Float = ICON_MIN_CONF
+        minConf: Float = ICON_MIN_CONF,
+        cachedUri: android.net.Uri? = null
     ): Boolean {
-        val ref = ReferenceStore.get(this, key) ?: return false
+        val ref = cachedUri ?: ReferenceStore.get(this, key) ?: return false
 
         val roiX = ControlCenter.targetX.value.toInt()
         val roiY = ControlCenter.targetY.value.toInt()

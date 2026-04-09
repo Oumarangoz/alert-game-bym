@@ -28,9 +28,11 @@ object AppLog {
     private val writerLock = Any()
 
     fun bind(context: Context) {
-        val dir = context.applicationContext.filesDir
-        dir.mkdirs()
-        logDir = dir
+        if (logDir == null) {
+            val dir = context.applicationContext.filesDir
+            dir.mkdirs()
+            logDir = dir
+        }
         startWriter()
     }
 
