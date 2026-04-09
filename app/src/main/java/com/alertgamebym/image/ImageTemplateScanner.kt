@@ -198,6 +198,10 @@ object ImageTemplateScanner {
                 cachedH = height
             }
 
+            // Eski frameleri temizle
+            repeat(3) { reader!!.acquireLatestImage()?.close() }
+            delay(50)
+            // Yeni taze frame al
             repeat(15) {
                 val image = reader!!.acquireLatestImage()
                 if (image != null) return imageToBitmap(image, width, height)
