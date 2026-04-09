@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Alert Game ByM Test</string>
+    <string name="accessibility_summary">Alert Game ByM tap test accessibility service</string>
+</resources>

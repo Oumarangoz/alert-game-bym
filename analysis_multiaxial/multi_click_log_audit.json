@@ -1,0 +1,362 @@
+[
+  {
+    "id": "LOG-01",
+    "severity": "high",
+    "confidence": "high",
+    "area": "logging",
+    "title": "In-memory log list is updated with a non-atomic read-modify-write pattern",
+    "summary": "`_lines.value = (_lines.value + line).takeLast(500)` can lose log entries when multiple threads call `AppLog.add()` at nearly the same time.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/AppLog.kt",
+        "line": 96,
+        "snippet": "_lines.value = (_lines.value + line).takeLast(500)"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 61,
+        "snippet": "background Default scope emits logs"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/accessibility/TapAccessibilityService.kt",
+        "line": 94,
+        "snippet": "gesture callback also emits logs"
+      }
+    ],
+    "why_it_matters": "The UI log panel and fallback export path can silently miss lines. This does not always produce a 0-byte file, but it does produce inconsistent exports and can make diagnosis look random.",
+    "fix_directions": [
+      "Protect `_lines` updates with a `Mutex` or replace list copies with a concurrent ring buffer.",
+      "Keep file persistence as the source of truth and treat the UI list as a best-effort preview only.",
+      "Add a monotonic sequence number per log line so missing lines become visible."
+    ],
+    "experiments": [
+      "Fire 2000 parallel `AppLog.add()` calls in a test and compare expected vs actual line count.",
+      "Temporarily prefix each line with an incrementing integer and inspect gaps."
+    ]
+  },
+  {
+    "id": "LOG-02",
+    "severity": "high",
+    "confidence": "medium",
+    "area": "logging/export",
+    "title": "Disk writer swallows write failures, which can hide the real reason behind empty or incomplete exports",
+    "summary": "The background writer catches all exceptions around `appendText()` and ignores them.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/AppLog.kt",
+        "line": 82,
+        "snippet": "catch (_: Throwable) { } around file.appendText"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/AppLog.kt",
+        "line": 80,
+        "snippet": "file.appendText(text, Charsets.UTF_8)"
+      }
+    ],
+    "why_it_matters": "If filesystem writes fail, the queue still drains and the app behaves as if persistence worked. Later, export logic may find an empty disk file and you lose the real failure signal.",
+    "fix_directions": [
+      "On write failure, enqueue a compact in-memory fault marker and expose a `LOG:DISK_WRITE_FAILED` counter in the UI.",
+      "Persist the last write error string in memory and include it in export output.",
+      "Hold a short retry budget before dropping the batch."
+    ],
+    "experiments": [
+      "Temporarily point log output to a read-only path in a debug build and verify the UI shows the failure.",
+      "Add a counter for failed file writes and surface it near the 'Log TXT Kaydet' button."
+    ]
+  },
+  {
+    "id": "LOG-03",
+    "severity": "medium",
+    "confidence": "medium",
+    "area": "logging/export",
+    "title": "Export can still be incomplete under sustained load because `flushBlocking()` proceeds even if timeout expires",
+    "summary": "`snapshotText()` calls `flushBlocking()`, but ignores whether the flush actually succeeded before reading the file and queue snapshot.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/AppLog.kt",
+        "line": 121,
+        "snippet": "flushBlocking(flushTimeoutMs)"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/AppLog.kt",
+        "line": 114,
+        "snippet": "flush success condition"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/MainActivity.kt",
+        "line": 150,
+        "snippet": "export uses snapshotText()"
+      }
+    ],
+    "why_it_matters": "If the queue is busy, part of the batch may already be dequeued but not yet written when export reads the file. That yields partial exports and makes rare empty exports more plausible under extreme churn.",
+    "fix_directions": [
+      "Make `snapshotText()` return both `text` and `flushComplete` and log a warning when exporting a partial snapshot.",
+      "Under export, temporarily pause new writer batches for a very short critical section.",
+      "Consider exporting from a locked append-only file handle rather than combining disk+queue+UI fallbacks."
+    ],
+    "experiments": [
+      "Create a stress test that adds logs continuously while exporting every second.",
+      "Record `queue_size`, `writer_busy`, and `flush_complete` in the exported header."
+    ]
+  },
+  {
+    "id": "LOG-04",
+    "severity": "medium",
+    "confidence": "medium",
+    "area": "logging/export",
+    "title": "Current code makes true 0-byte exports less likely, so remaining 0-byte cases probably need instrumentation rather than blind patching",
+    "summary": "The latest code falls back to the in-memory list when disk and queue snapshots are blank. That means recurring 0-byte files are likely caused by state reset, provider behavior, or a path outside the current happy path.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/AppLog.kt",
+        "line": 139,
+        "snippet": "fallback to in-memory lines"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/MainActivity.kt",
+        "line": 155,
+        "snippet": "export success is logged after stream write"
+      }
+    ],
+    "why_it_matters": "This is where overconfidence is dangerous: the current code already contains a fallback. If the user still gets 0-byte files, the next step should be evidence collection, not guessing.",
+    "fix_directions": [
+      "Write an export header with `line_count`, `disk_bytes`, `queue_size`, and `flush_complete` for every saved file.",
+      "Store the exact export byte count in a log line after saving.",
+      "Verify whether the target document provider is returning an empty writable stream on the specific device/app picker."
+    ],
+    "experiments": [
+      "After export, immediately reopen the same URI and log the actual byte count read back.",
+      "Test saving to Downloads, Drive, and another provider to see if the bug is provider-specific."
+    ]
+  },
+  {
+    "id": "TAP-01",
+    "severity": "high",
+    "confidence": "high",
+    "area": "clicking/anti-spam",
+    "title": "Anti-spam is global, not phase-aware, even though the API shape suggests phase-aware logic",
+    "summary": "`shouldClickPhase()` accepts `phaseKey` but only compares the last point/time. A valid second tap in another phase can be blocked if it lands near the same coordinate within 1200 ms.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 1070,
+        "snippet": "phaseKey is accepted"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 1071,
+        "snippet": "decision ignores phaseKey"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 1080,
+        "snippet": "phaseKey also ignored on mark"
+      }
+    ],
+    "why_it_matters": "If STATE1 and STATE2 or repeated actions happen near the same on-screen coordinate, the app can skip a legitimate tap and then appear inconsistent or 'stuck'.",
+    "fix_directions": [
+      "Track anti-spam per phase key, or per `(phaseKey, roundedX, roundedY)` tuple.",
+      "Include the phase key in the dedupe state and log the exact reason for rejection.",
+      "Reduce the time window or make it configurable in debug builds."
+    ],
+    "experiments": [
+      "Log `phaseKey`, `lastPhaseKey`, and the point delta when anti-spam blocks a tap.",
+      "Temporarily disable anti-spam and compare behavior on the failing screen."
+    ]
+  },
+  {
+    "id": "TAP-02",
+    "severity": "high",
+    "confidence": "high",
+    "area": "clicking/visibility",
+    "title": "The blue bubble stays visible during scan/tap cycles and can contaminate screenshots or cover targets",
+    "summary": "Transient overlays are hidden, but the main bubble is intentionally kept visible and touchable during capture and tap flows.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 187,
+        "snippet": "method keeps bubble"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 192,
+        "snippet": "bubble remains visible/touchable"
+      }
+    ],
+    "why_it_matters": "If the bubble overlaps the ROI or item region, the screenshot contains app-owned pixels instead of game pixels. This can break matching and OCR in a way that looks random to the user.",
+    "fix_directions": [
+      "Add a 'hide bubble during scan/tap' option and default it on for automation.",
+      "At minimum, auto-move the bubble away from both the icon ROI and item ROI before a scan.",
+      "Log the bubble bounds together with the ROI bounds to detect overlap."
+    ],
+    "experiments": [
+      "Move the bubble far from the ROI and compare match rate.",
+      "Capture and save the exact screenshot used for matching on a failing run."
+    ]
+  },
+  {
+    "id": "TAP-03",
+    "severity": "high",
+    "confidence": "high",
+    "area": "matching",
+    "title": "Template matching search is fragile for device scaling and animation variance",
+    "summary": "Matching only tries 3 scales (0.90, 1.00, 1.10) with a fixed step of 3 pixels. Animated UI, DPI changes, and slight zoom differences can be enough to miss.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/image/ImageTemplateScanner.kt",
+        "line": 75,
+        "snippet": "only three scales"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/image/ImageTemplateScanner.kt",
+        "line": 107,
+        "snippet": "fixed step size"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 273,
+        "snippet": "user-visible symptom is repeated 'not found'"
+      }
+    ],
+    "why_it_matters": "This directly matches the symptom where test taps succeed but auto mode cannot find the red/brown icon in ROI.",
+    "fix_directions": [
+      "Widen the scale set (for example 0.80..1.20 with coarse-to-fine refinement).",
+      "Allow per-reference confidence thresholds and save the best score history.",
+      "Persist a debug crop of the ROI plus the reference thumbnail whenever a match fails."
+    ],
+    "experiments": [
+      "Dump the ROI bitmap and top-5 scores for 20 failing runs.",
+      "Test a second matching method, such as edge map or normalized cross-correlation, on the same frames."
+    ]
+  },
+  {
+    "id": "TAP-04",
+    "severity": "medium",
+    "confidence": "high",
+    "area": "capture/performance",
+    "title": "Each scan creates a new VirtualDisplay and ImageReader, which increases latency and stale-frame risk",
+    "summary": "Both template matching and OCR create a fresh screen capture pipeline every time they run.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/image/ImageTemplateScanner.kt",
+        "line": 170,
+        "snippet": "new ImageReader for every template scan"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/ocr/OcrDebugScanner.kt",
+        "line": 58,
+        "snippet": "new ImageReader for every OCR scan"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/image/ImageTemplateScanner.kt",
+        "line": 183,
+        "snippet": "retries wait for frames"
+      }
+    ],
+    "why_it_matters": "When the target moves fast, the app may tap based on an older frame. To the user this looks like 'it found it but still missed'.",
+    "fix_directions": [
+      "Keep a reusable capture session alive while automation is running.",
+      "Time-stamp each captured frame and log capture age at tap time.",
+      "Add a max-age check: do not tap using a frame older than a threshold."
+    ],
+    "experiments": [
+      "Log capture duration and frame age for every successful/failed match.",
+      "Compare match success with a persistent VirtualDisplay implementation."
+    ]
+  },
+  {
+    "id": "TAP-05",
+    "severity": "medium",
+    "confidence": "high",
+    "area": "item-ocr",
+    "title": "OCR item selection uses nearest-to-center instead of best interaction target",
+    "summary": "When several OCR lines contain the query, the code picks the line nearest to the ROI center, not the most likely clickable control.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 1019,
+        "snippet": "nearest-to-center winner"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 1004,
+        "snippet": "substring matching can match multiple lines"
+      }
+    ],
+    "why_it_matters": "On crowded screens, the chosen OCR line may not be the intended item or may point to text instead of the tappable hotspot.",
+    "fix_directions": [
+      "Rank candidates by text similarity, line size, and distance to a learned item anchor rather than center alone.",
+      "Let the user choose between 'nearest center', 'topmost', and 'highest confidence' policies in debug mode.",
+      "Store bounding boxes and tap relative to a configurable offset within the matched box."
+    ],
+    "experiments": [
+      "Log all candidate lines and their scores for failing OCR taps.",
+      "Try a policy that picks the lowest candidate in the ROI if the game list grows downward."
+    ]
+  },
+  {
+    "id": "TAP-06",
+    "severity": "medium",
+    "confidence": "medium",
+    "area": "gesture-lifecycle",
+    "title": "Gesture timeout handling is better now, but the app still lacks a full action-level acknowledgement model",
+    "summary": "`performTapAt()` treats `completed` as success, but the higher-level flow has no visual post-condition check that the intended UI actually changed.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/accessibility/TapAccessibilityService.kt",
+        "line": 34,
+        "snippet": "gesture timeout exists"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 866,
+        "snippet": "flow trusts gesture completion"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 262,
+        "snippet": "phase advances after tap success"
+      }
+    ],
+    "why_it_matters": "A completed injected gesture is not the same as a confirmed in-game action. Without a post-condition, the state machine can drift away from the real UI.",
+    "fix_directions": [
+      "After a tap, verify a small post-condition: icon disappeared, item appeared, or OCR text changed.",
+      "Distinguish `gesture_success` from `action_confirmed` in logs.",
+      "Retry or roll back phase when the expected visual change does not happen within a short window."
+    ],
+    "experiments": [
+      "For STATE1 and STATE2, sample the ROI again 150–300 ms after tap and check whether confidence changed as expected.",
+      "Add a debug mode that saves before/after ROI pairs for each tap."
+    ]
+  },
+  {
+    "id": "OPS-01",
+    "severity": "medium",
+    "confidence": "high",
+    "area": "observability",
+    "title": "The app needs stronger evidence capture before more patching",
+    "summary": "The code now has several protections already. The fastest path to the next real fix is to collect more structured evidence rather than continue blind patching.",
+    "evidence": [
+      {
+        "path": "app/src/main/java/com/alertgamebym/MainActivity.kt",
+        "line": 487,
+        "snippet": "log UI exists"
+      },
+      {
+        "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "line": 246,
+        "snippet": "runtime config is already logged"
+      }
+    ],
+    "why_it_matters": "This project has already gone through multiple rounds of patching. At this stage, the missing piece is usually not another guess but a better per-run trace.",
+    "fix_directions": [
+      "Add a per-run session id, exported header, counters, and small image artifacts for failing scans.",
+      "When export succeeds, include byte count and provider authority in the saved file.",
+      "Add a one-button 'diagnostic bundle' export containing log, config, ROI screenshot, and reference thumbnails."
+    ],
+    "experiments": [
+      "Implement a debug build option that writes a zipped diagnostic bundle after every failed cycle.",
+      "Compare three sessions on the same screen with only one variable changed each time: bubble position, confidence threshold, and ROI size."
+    ]
+  }
+]

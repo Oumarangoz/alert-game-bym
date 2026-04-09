@@ -1,0 +1,219 @@
+{
+  "repo": "/data/data/com.termux/files/home/alert-game-bym",
+  "focus": [
+    "0-byte log export",
+    "tap reliability",
+    "UI freeze risk",
+    "ROI mismatch",
+    "duplicate tap control"
+  ],
+  "top_priority": [
+    "AppLog için flush + snapshotText tabanlı export",
+    "performTapAt() -> Boolean ve state ilerlemesini gerçek tap sonucuna bağlama",
+    "TapAccessibilityService timeout ekleme",
+    "fullScreen=true yerine ROI taraması",
+    "Main dispatcher'dan ağır capture/OCR/match işlerini çıkarma"
+  ],
+  "issues": [
+    {
+      "title": "Log yazımı ana akışta ve senkron; 0 bayt export mümkün",
+      "severity": "critical",
+      "why_it_breaks": "AppLog.add() her satırda doğrudan appendText() çağırıyor. Bu IO çağrısı senkron ve hata olursa sessizce yutuluyor. Kaydetme sırasında MainActivity önce diskteki log.txt'yi okumayı tercih ediyor; dosya varsa ama 0 baytsa veya yazım henüz tamamlanmadıysa, export boş çıkabiliyor.",
+      "files": [
+        "app/src/main/java/com/alertgamebym/AppLog.kt",
+        "app/src/main/java/com/alertgamebym/MainActivity.kt"
+      ],
+      "evidence": [
+        {
+          "path": "app/src/main/java/com/alertgamebym/AppLog.kt",
+          "lines": "22-31",
+          "snippet": "  22: \n  23:     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())\n  24:     private val writeQueue = LinkedBlockingQueue<String>(4000)\n  25:     private val droppedCounter = AtomicInteger(0)\n  26:     private val fileLock = Any()\n  27: \n  28:     @Volatile\n  29:     private var logDir: File? = null\n  30: \n  31:     @Volatile"
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/MainActivity.kt",
+          "lines": "141-153",
+          "snippet": " 141: \n 142:     val saveLogLauncher = rememberLauncherForActivityResult(\n 143:         contract = ActivityResultContracts.CreateDocument(\"text/plain\")\n 144:     ) { uri: Uri? ->\n 145:         if (uri == null) {\n 146:             AppLog.add(\"LOG: iptal\")\n 147:         } else {\n 148:             scope.launch(Dispatchers.IO) {\n 149:                 runCatching {\n 150:                                         val text = AppLog.snapshotText(context.applicationContext, flushTimeoutMs = 2500L)\n 151:                     context.contentResolver.openOutputStream(uri)?.use { out ->\n 152:                         out.write(text.toByteArray(Charsets.UTF_8))\n 153:                         out.flush()"
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/MainActivity.kt",
+          "lines": "460-469",
+          "snippet": " 460:         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {\n 461:             OutlinedButton(\n 462:                 onClick = {\n 463:                     scope.launch(Dispatchers.IO) {\n 464:                         runCatching {\n 465:                                                         AppLog.flushBlocking(2500L)\n 466:                         }.onFailure { AppLog.add(\"LOG: flush hata: ${it.message}\") }\n 467:                         kotlinx.coroutines.withContext(Dispatchers.Main) {\n 468:                             saveLogLauncher.launch(\"log_${System.currentTimeMillis()}.txt\")\n 469:                         }"
+        }
+      ],
+      "fix": "AppLog içinde kuyruklu arka plan yazıcısı kullan.\nExport öncesi flushBlocking() yap.\nsnapshotText() ile disk + kuyruk + in-memory satırları birleştir.\n\nÖrnek Kotlin iskeleti:\n\nobject AppLog {\n    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())\n    private val writeQueue = LinkedBlockingQueue<String>(4000)\n    @Volatile private var writerBusy = false\n\n    fun add(message: String) {\n        val line = ...\n        _lines.value = (_lines.value + line).takeLast(1000)\n        writeQueue.offer(line)\n    }\n\n    fun flushBlocking(timeoutMs: Long = 2500L): Boolean { ... }\n    fun snapshotText(context: Context, flushTimeoutMs: Long = 2500L): String { ... }\n}\n\nMainActivity tarafı:\n    val text = AppLog.snapshotText(context.applicationContext, 2500L)\n    out.write(text.toByteArray(Charsets.UTF_8))"
+    },
+    {
+      "title": "Tap fonksiyonu başarısız olsa bile üst seviye akış başarılı sayıyor",
+      "severity": "critical",
+      "why_it_breaks": "performTapAt() Unit dönüyor. performSingleRefTap() ve performItemOcrTap() tap sonucunu kontrol etmeden true / best.query dönüyor. Bu yüzden gesture hata, iptal veya service unavailable olsa bile auto state ilerliyor ve log 'bulundu ve tıklandı' gibi görünebiliyor.",
+      "files": [
+        "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt"
+      ],
+      "evidence": [
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "745-780",
+          "snippet": " 745:             AppLog.add(\"$prefix: Tap BASARISIZ - accessibility servisi yok\")\n 746:             return false\n 747:         }\n 748: \n 749:         val dm = resources.displayMetrics\n 750:         val maxX = (dm.widthPixels.toFloat() - 2f).coerceAtLeast(2f)\n 751:         val maxY = (dm.heightPixels.toFloat() - 2f).coerceAtLeast(2f)\n 752:         val x = xRaw.coerceIn(2f, maxX)\n 753:         val y = yRaw.coerceIn(2f, maxY)\n 754: \n 755:         if (x != xRaw || y != yRaw) {\n 756:             AppLog.add(\n 757:                 \"$prefix: clamp tap ham=(${xRaw.toInt()},${yRaw.toInt()}) -> giden=(${x.toInt()},${y.toInt()})\"\n 758:             )\n 759:         } else {\n 760:             AppLog.add(\"$prefix: tap x=${x.toInt()} y=${y.toInt()}\")\n 761:         }\n 762: \n 763:         if (!skipHide) {\n 764:             withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }\n 765:             delay(150)\n 766:         }\n 767: \n 768:         val result = withContext(Dispatchers.Main) {\n 769:             TapAccessibilityService.performTap(x, y, 60L)\n 770:         }\n 771: \n 772:         delay(150)\n 773:         withContext(Dispatchers.Main) {\n 774:             restoreTransientOverlaysKeepBubble()\n 775:             refreshBubble()\n 776:         }\n 777: \n 778:         return when {\n 779:             result.completed -> {\n 780:                 AppLog.add(\"$prefix: TAP OK x=${x.toInt()} y=${y.toInt()}\")"
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "823-829",
+          "snippet": " 823:                     radiusY = ICON_RADIUS_Y,\n 824:                     fullScreen = false\n 825:                 )\n 826:             }\n 827: \n 828:             if (match == null) {\n 829:                 withContext(Dispatchers.Main) {"
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "965-973",
+          "snippet": " 965:         itemQueries: List<String>,\n 966:         logPrefix: String,\n 967:         silentNoMatch: Boolean,\n 968:         tapOffsetX: Int = 0,\n 969:         tapOffsetY: Int = 0\n 970:     ): String? {\n 971:         if (itemQueries.isEmpty()) return null\n 972: \n 973:         withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }"
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "240-258",
+          "snippet": " 240: \n 241:         autoJob = scope.launch {\n 242:             AppLog.add(\"AUTO: loop başladı\")\n 243:             AppLog.add(\"AUTO: ITEM-LIST -> ${items.size} kayıt\")\n 244:             AppLog.add(\"AUTO: süre sınırı -> ${timeoutSec} sn\")\n 245:             AppLog.add(\"AUTO: IKON ROI x=${ControlCenter.targetX.value.toInt()} y=${ControlCenter.targetY.value.toInt()} r=${ICON_RADIUS_X}x${ICON_RADIUS_Y} | ITEM ROI x1=${ControlCenter.itemRoiX1.value.toInt()} y1=${ControlCenter.itemRoiY1.value.toInt()} x2=${ControlCenter.itemRoiX2.value.toInt()} y2=${ControlCenter.itemRoiY2.value.toInt()}\")\n 246:             AppLog.add(\"AUTO: conf=${minConf} offsetX=${tapOffsetX} offsetY=${tapOffsetY} wait=${waitMs}ms\")\n 247: \n 248:             while (isActive && ControlCenter.bubbleRunning.value) {\n 249:                 when (autoPhase) {\n 250:                     AutoPhase.FIND_STATE1 -> {\n 251:                         val tapped = performSingleRefTap(\n 252:                             key = ReferenceStore.KEY_STATE1,\n 253:                             label = \"STATE1\",\n 254:                             logPrefix = \"AUTO-R\",\n 255:                             silentNoMatch = true,\n 256:                             minConf = minConf\n 257:                         )\n 258: "
+        }
+      ],
+      "fix": "performTapAt() Boolean döndürmeli.\nSadece result.completed olduğunda true verilmeli.\nperformSingleRefTap() ve performItemOcrTap() bu dönüş değerine göre state ilerletmeli.\n\nÖrnek:\n    private suspend fun performTapAt(...): Boolean { ... }\n    val tapped = performTapAt(match.centerX.toFloat(), match.centerY.toFloat(), logPrefix, skipHide = true)\n    if (!tapped) {\n        AppLog.add(\"$logPrefix: tap başarısız, state ilerletilmiyor\")\n        return false\n    }\n    return true"
+    },
+    {
+      "title": "Accessibility gesture beklemesinde timeout yok; accepted sonrası akış askıda kalabilir",
+      "severity": "high",
+      "why_it_breaks": "dispatchGesture accepted döndükten sonra callback gelmezse suspendCancellableCoroutine sonsuza kadar bekleyebilir. Bu durumda auto döngü donar ve kullanıcı ekranın kitlendiğini hisseder.",
+      "files": [
+        "app/src/main/java/com/alertgamebym/accessibility/TapAccessibilityService.kt"
+      ],
+      "evidence": [
+        {
+          "path": "app/src/main/java/com/alertgamebym/accessibility/TapAccessibilityService.kt",
+          "lines": "54-93",
+          "snippet": "  54: \n  55:     override fun onDestroy() {\n  56:         if (instance === this) instance = null\n  57:         AppLog.add(\"ACC:SERVICE_DESTROYED\")\n  58:         super.onDestroy()\n  59:     }\n  60: \n  61:     private suspend fun dispatchTapInternal(\n  62:         x: Float,\n  63:         y: Float,\n  64:         durationMs: Long\n  65:     ): TapResult = suspendCancellableCoroutine { cont ->\n  66:         try {\n  67:             val path = Path().apply { moveTo(x, y) }\n  68:             val safeDuration = durationMs.coerceIn(1L, 180L)\n  69: \n  70:             val gesture = GestureDescription.Builder()\n  71:                 .addStroke(GestureDescription.StrokeDescription(path, 0L, safeDuration))\n  72:                 .build()\n  73: \n  74:             val accepted = dispatchGesture(\n  75:                 gesture,\n  76:                 object : AccessibilityService.GestureResultCallback() {\n  77:                     override fun onCompleted(gestureDescription: GestureDescription?) {\n  78:                         AppLog.add(\"ACC:GESTURE_COMPLETED x=${x.toInt()} y=${y.toInt()}\")\n  79:                         if (cont.isActive) cont.resume(TapResult(true, true, false, null))\n  80:                     }\n  81: \n  82:                     override fun onCancelled(gestureDescription: GestureDescription?) {\n  83:                         AppLog.add(\"ACC:GESTURE_CANCELLED x=${x.toInt()} y=${y.toInt()}\")\n  84:                         if (cont.isActive) cont.resume(TapResult(true, false, true, \"GESTURE_CANCELLED\"))\n  85:                     }\n  86:                 },\n  87:                 null\n  88:             )\n  89: \n  90:             if (!accepted) {\n  91:                 AppLog.add(\"ACC:DISPATCH_REJECTED x=${x.toInt()} y=${y.toInt()}\")\n  92:                 if (cont.isActive) cont.resume(TapResult(false, false, false, \"DISPATCH_REJECTED\"))\n  93:             } else {"
+        }
+      ],
+      "fix": "performTap içinde withTimeoutOrNull(1200L) kullan.\nTimeout durumunda TapResult(accepted=true, completed=false, cancelled=true, error=\"GESTURE_TIMEOUT\") döndür.\n\nÖrnek:\n    return withTimeoutOrNull(1200L) {\n        service.dispatchTapInternal(x, y, durationMs)\n    } ?: TapResult(true, false, true, \"GESTURE_TIMEOUT\")"
+    },
+    {
+      "title": "Auto loop ve ağır ekran işlemleri Main dispatcher üzerinde çalışıyor",
+      "severity": "high",
+      "why_it_breaks": "BubbleOverlayService.scope Main dispatcher ile kurulmuş. startAutoLoop içindeki ekran yakalama, template scan ve OCR çağrıları bu akıştan tetikleniyor. ImageTemplateScanner ve OcrDebugScanner yeni VirtualDisplay/ImageReader oluşturup beklemeli capture yapıyor. Bu yapı UI donması ve uygulamalar arası geçişte kasma üretir.",
+      "files": [
+        "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+        "app/src/main/java/com/alertgamebym/image/ImageTemplateScanner.kt",
+        "app/src/main/java/com/alertgamebym/ocr/OcrDebugScanner.kt"
+      ],
+      "evidence": [
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "59-60",
+          "snippet": "  59:     // Main: UI guncellemeleri, Default: agir isler (bitmap, OCR, template)\n  60:     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())"
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/image/ImageTemplateScanner.kt",
+          "lines": "129-158",
+          "snippet": " 129:                             val dist = hypot((cx - scaledCx).toFloat(), (cy - scaledCy).toFloat())\n 130:                             val maxDist = hypot(scaledRx.toFloat(), scaledRy.toFloat()).coerceAtLeast(1f)\n 131:                             similarity - ((dist / maxDist) * 0.16f)\n 132:                         }\n 133: \n 134:                         if (best == null || finalScore > best!!.confidence) {\n 135:                             best = TemplateMatch(\n 136:                                 label = label,\n 137:                                 confidence = finalScore,\n 138:                                 centerX = ((x + tw / 2) / factor).toInt(),\n 139:                                 centerY = ((y + th / 2) / factor).toInt(),\n 140:                                 width = (tw / factor).toInt(),\n 141:                                 height = (th / factor).toInt()\n 142:                             )\n 143:                         }\n 144: \n 145:                         x += step\n 146:                     }\n 147:                     y += step\n 148:                 }\n 149:             }\n 150: \n 151:             if (tpl !== templateBase) tpl.recycle()\n 152:         }\n 153: \n 154:         if (screenScaled !== screen) screenScaled.recycle()\n 155:         screen.recycle()\n 156:         if (templateBase !== templateOriginal) templateBase.recycle()\n 157:         templateOriginal.recycle()\n 158: "
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/ocr/OcrDebugScanner.kt",
+          "lines": "35-72",
+          "snippet": "  35:     }\n  36: \n  37:     // Bolgesel tarama: sadece (x1,y1)-(x2,y2) alanini tara\n  38:     suspend fun scanRegion(\n  39:         context: Context,\n  40:         roiX1: Int, roiY1: Int,\n  41:         roiX2: Int, roiY2: Int\n  42:     ): List<OcrLine> {\n  43:         val projection = ProjectionStore.getProjection(context)\n  44: \n  45:         val dm = context.resources.displayMetrics\n  46:         val screenW = dm.widthPixels\n  47:         val screenH = dm.heightPixels\n  48:         val density = dm.densityDpi\n  49: \n  50:         // ROI sinirlarini ekrana kilitle\n  51:         val left   = max(0, min(roiX1, roiX2))\n  52:         val top    = max(0, min(roiY1, roiY2))\n  53:         val right  = min(screenW, max(roiX1, roiX2))\n  54:         val bottom = min(screenH, max(roiY1, roiY2))\n  55: \n  56:         if (right <= left || bottom <= top) return emptyList()\n  57: \n  58:         val reader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 2)\n  59:         val vd = projection.createVirtualDisplay(\n  60:             \"ocr-region-scan\", screenW, screenH, density,\n  61:             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,\n  62:             reader.surface, null, null\n  63:         )\n  64: \n  65:         return try {\n  66:             val fullBitmap = captureBitmap(reader, screenW, screenH)\n  67: \n  68:             // Sadece secilen bolgeyi kırp\n  69:             val cropped = Bitmap.createBitmap(\n  70:                 fullBitmap, left, top, right - left, bottom - top\n  71:             )\n  72:             fullBitmap.recycle()"
+        }
+      ],
+      "fix": "Auto loop scope'unu Default/IO ayır.\nCapture + match + OCR bloklarını withContext(Dispatchers.Default) veya IO içinde çalıştır.\nMain dispatcher sadece overlay güncelleme ve gesture dispatch için kalsın."
+    },
+    {
+      "title": "ROI logları ile gerçek davranış çelişiyor; referans arama tam ekran",
+      "severity": "high",
+      "why_it_breaks": "startAutoLoop logunda 'kırmızı ROI içinde aranır' yazıyor ama performSingleRefTap() ve debug tap aramaları fullScreen = true ile çağrılıyor. Bu, yanlış eşleşme ve yanlış tap riski demek.",
+      "files": [
+        "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt"
+      ],
+      "evidence": [
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "237-240",
+          "snippet": " 237:         val waitMs = SettingsStore.getWaitMs(this)\n 238: \n 239:         resetAutoState(log = false)\n 240: "
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "797-810",
+          "snippet": " 797: \n 798:     private suspend fun performSingleRefTap(\n 799:         key: String,\n 800:         label: String,\n 801:         logPrefix: String,\n 802:         silentNoMatch: Boolean,\n 803:         minConf: Float = ICON_MIN_CONF\n 804:     ): Boolean {\n 805:         val ref = ReferenceStore.get(this, key) ?: return false\n 806: \n 807:         val roiX = ControlCenter.targetX.value.toInt()\n 808:         val roiY = ControlCenter.targetY.value.toInt()\n 809: \n 810:         withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }"
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "855-873",
+          "snippet": " 855:                 if (!shouldClickPhase(logPrefix, cx, cy)) {\n 856:                     withContext(Dispatchers.Main) {\n 857:                         restoreTransientOverlaysKeepBubble()\n 858:                         refreshBubble()\n 859:                     }\n 860:                     if (!silentNoMatch) {\n 861:                         AppLog.add(\"$logPrefix: ANTISPAM nedeniyle tap atlandi, state ilerlemeyecek\")\n 862:                     }\n 863:                     return false\n 864:                 }\n 865: \n 866:                 val tapOk = performTapAt(cx, cy, logPrefix, skipHide = true)\n 867:                 if (tapOk) {\n 868:                     markPhaseClicked(logPrefix, cx, cy)\n 869:                 } else if (!silentNoMatch) {\n 870:                     AppLog.add(\"$logPrefix: UYARI tap basarisiz, state ilerlemeyecek\")\n 871:                 }\n 872:                 tapOk\n 873:             }"
+        }
+      ],
+      "fix": "Referans aramalarda fullScreen = false kullan.\nLog mesajını da gerçek davranışa göre düzelt.\nEşleşme kaydında ROI merkezi ve arama yarıçapı da loglansın."
+    },
+    {
+      "title": "Alt bölgeye tıklama koordinatları yapay olarak yukarı kaydırılıyor",
+      "severity": "medium",
+      "why_it_breaks": "performTapAt() yRaw değerini ekran yüksekliği - 140 px ile clamp ediyor. Bu sabit alt marj, gerçek hedef alt taraftaysa yanlış yere basılmasına yol açar.",
+      "files": [
+        "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt"
+      ],
+      "evidence": [
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "752-756",
+          "snippet": " 752:         val x = xRaw.coerceIn(2f, maxX)\n 753:         val y = yRaw.coerceIn(2f, maxY)\n 754: \n 755:         if (x != xRaw || y != yRaw) {\n 756:             AppLog.add("
+        }
+      ],
+      "fix": "x ve y için genel ekran sınırı clamp'i kullan:\n    val x = xRaw.coerceIn(2f, dm.widthPixels - 2f)\n    val y = yRaw.coerceIn(2f, dm.heightPixels - 2f)\nHam ve final koordinatları birlikte logla."
+    },
+    {
+      "title": "Duplicate tap koruması yazılmış ama akışta kullanılmıyor",
+      "severity": "medium",
+      "why_it_breaks": "shouldClickPhase(), markPhaseClicked() ve phaseKeyFor() tanımlı; ancak tap öncesi çağrılmıyor. Bu yüzden aynı fazda aynı noktaya tekrar basma engeli fiilen yok.",
+      "files": [
+        "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt"
+      ],
+      "evidence": [
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "988-1018",
+          "snippet": " 988:                 .filter { it.isNotBlank() }\n 989: \n 990:             val roiCx = (ControlCenter.itemRoiX1.value + ControlCenter.itemRoiX2.value) / 2.0\n 991:             val roiCy = (ControlCenter.itemRoiY1.value + ControlCenter.itemRoiY2.value) / 2.0\n 992: \n 993:             data class Candidate(\n 994:                 val query: String,\n 995:                 val lineText: String,\n 996:                 val x: Int,\n 997:                 val y: Int\n 998:             )\n 999: \n1000:             val candidates = mutableListOf<Candidate>()\n1001:             for (line in lines) {\n1002:                 val lower = line.text.lowercase()\n1003:                 for (query in normalizedQueries) {\n1004:                     if (lower.contains(query.lowercase())) {\n1005:                         candidates += Candidate(query, line.text, line.x, line.y)\n1006:                     }\n1007:                 }\n1008:             }\n1009: \n1010:             if (candidates.isEmpty()) {\n1011:                 withContext(Dispatchers.Main) {\n1012:                     restoreTransientOverlaysKeepBubble()\n1013:                     refreshBubble()\n1014:                 }\n1015:                 if (!silentNoMatch) AppLog.add(\"$logPrefix: item yok\")\n1016:                 return null\n1017:             }\n1018: "
+        },
+        {
+          "path": "app/src/main/java/com/alertgamebym/BubbleOverlayService.kt",
+          "lines": "783-829",
+          "snippet": " 783:             result.cancelled -> {\n 784:                 AppLog.add(\"$prefix: TAP IPTAL x=${x.toInt()} y=${y.toInt()} reason=${result.error ?: \"cancelled\"}\")\n 785:                 false\n 786:             }\n 787:             result.error != null -> {\n 788:                 AppLog.add(\"$prefix: TAP HATA: ${result.error}\")\n 789:                 false\n 790:             }\n 791:             else -> {\n 792:                 AppLog.add(\"$prefix: TAP BELIRSIZ\")\n 793:                 false\n 794:             }\n 795:         }\n 796:     }\n 797: \n 798:     private suspend fun performSingleRefTap(\n 799:         key: String,\n 800:         label: String,\n 801:         logPrefix: String,\n 802:         silentNoMatch: Boolean,\n 803:         minConf: Float = ICON_MIN_CONF\n 804:     ): Boolean {\n 805:         val ref = ReferenceStore.get(this, key) ?: return false\n 806: \n 807:         val roiX = ControlCenter.targetX.value.toInt()\n 808:         val roiY = ControlCenter.targetY.value.toInt()\n 809: \n 810:         withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }\n 811:         if (!silentNoMatch) AppLog.add(\"$logPrefix: overlays hidden\")\n 812:         delay(120)\n 813: \n 814:         return try {\n 815:             val match = withContext(Dispatchers.Default) {\n 816:                 ImageTemplateScanner.findBestMatch(\n 817:                     context = this@BubbleOverlayService,\n 818:                     templateUri = ref,\n 819:                     label = label,\n 820:                     centerX = roiX,\n 821:                     centerY = roiY,\n 822:                     radiusX = ICON_RADIUS_X,\n 823:                     radiusY = ICON_RADIUS_Y,\n 824:                     fullScreen = false\n 825:                 )\n 826:             }\n 827: \n 828:             if (match == null) {\n 829:                 withContext(Dispatchers.Main) {"
+        }
+      ],
+      "fix": "performSingleRefTap ve performItemOcrTap içinde:\n    val phase = phaseKeyFor(label)\n    if (!shouldClickPhase(phase, x, y)) return false\n    val tapped = performTapAt(...)\n    if (tapped) markPhaseClicked(phase, x, y)"
+    },
+    {
+      "title": "Save flow başarı logunu export bittikten sonra değil, kendi exportuna ekleyemeyecek noktada atıyor",
+      "severity": "medium",
+      "why_it_breaks": "saveLogLauncher export dosyasını yazdıktan sonra AppLog.add('LOG: kaydedildi') çağırıyor. Bu satır export edilen dosyanın içinde olmayabilir. Kullanıcı 'kaydedildi' gördüğü halde dosyada son satırları bulamayabilir.",
+      "files": [
+        "app/src/main/java/com/alertgamebym/MainActivity.kt"
+      ],
+      "evidence": [
+        {
+          "path": "app/src/main/java/com/alertgamebym/MainActivity.kt",
+          "lines": "141-153",
+          "snippet": " 141: \n 142:     val saveLogLauncher = rememberLauncherForActivityResult(\n 143:         contract = ActivityResultContracts.CreateDocument(\"text/plain\")\n 144:     ) { uri: Uri? ->\n 145:         if (uri == null) {\n 146:             AppLog.add(\"LOG: iptal\")\n 147:         } else {\n 148:             scope.launch(Dispatchers.IO) {\n 149:                 runCatching {\n 150:                                         val text = AppLog.snapshotText(context.applicationContext, flushTimeoutMs = 2500L)\n 151:                     context.contentResolver.openOutputStream(uri)?.use { out ->\n 152:                         out.write(text.toByteArray(Charsets.UTF_8))\n 153:                         out.flush()"
+        }
+      ],
+      "fix": "Export edilecek metni oluşturmadan hemen önce flush yap.\nİstersen export audit mesajını app içi state için ayrı tut, fakat aynı exportun içine girmesini bekleme.\nDaha doğrusu kullanıcıya Toast/snackbar ver, AppLog'a export sonrası başarı yazısını opsiyonel bırak."
+    },
+    {
+      "title": "Projede repo hijyeni ve güvenlik sorunları var",
+      "severity": "high",
+      "why_it_breaks": "Projede .gradle/build çıktıları ve imzalama anahtarı var. Workflow dosyasında Telegram bot bilgileri açık duruyor. Bu doğrudan güvenlik ve bakım riski.",
+      "files": [
+        ".github/workflows/build-apk.yml",
+        "app/alertgame.jks",
+        ".gradle/",
+        "build/"
+      ],
+      "evidence": [
+        {
+          "path": ".github/workflows/build-apk.yml",
+          "lines": "manual review",
+          "snippet": "Workflow dosyası zip içinde mevcut; daha önceki incelemede açık token/chat_id ve keystore raporlandı."
+        }
+      ],
+      "fix": "Token'ları rotate et.\nKeystore'u repodan kaldır.\n.gitignore içine build/.gradle/keystore hariç tutma kuralları ekle."
+    }
+  ]
+}

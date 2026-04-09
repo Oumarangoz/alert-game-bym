@@ -1,0 +1,13 @@
+.gradle/
+local.properties
+.idea/
+build/
+captures/
+*.apk
+*.aab
+*.bak
+*.bak_*
+*.ktq
+fix_*.py
+fix_*.kt
+termux_*.py
