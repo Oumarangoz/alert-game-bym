@@ -264,30 +264,49 @@ object ImageTemplateScanner {
         var rDiffSum = 0f
         var gDiffSum = 0f
         var bDiffSum = 0f
-        val count = sampleCols * sampleRows
+        var weightSum = 0f
+
+        // Merkez: ikon ic kismi (glow ring disarida kalir)
+        // Glow ring genelde dis %30-35'lik halka - merkeze yakin pikseller daha onemli
+        val cx = sampleCols / 2f
+        val cy = sampleRows / 2f
+        val maxR = cx * 0.72f // ic %72'lik daireyi hedefle, dis %28 dusuk agirlik
 
         for (ry in 0 until sampleRows) {
             val ty = if (sampleRows == 1) 0 else (ry * (tplH - 1)) / (sampleRows - 1)
             for (rx in 0 until sampleCols) {
                 val tx = if (sampleCols == 1) 0 else (rx * (tplW - 1)) / (sampleCols - 1)
+
+                // Merkeze uzaklik (0.0 = merkez, 1.0 = kose)
+                val dx = (rx - cx) / cx
+                val dy = (ry - cy) / cy
+                val dist = kotlin.math.sqrt(dx * dx + dy * dy).coerceAtMost(1f)
+
+                // Merkez agirlik: ic piksel 1.0, dis piksel 0.15
+                // Glow ring dis halkada, dusuk agirlikla skoru bozmaz
+                val weight = if (dist <= 0.65f) 1.0f
+                             else if (dist <= 0.85f) 0.4f
+                             else 0.15f
+
                 val sIdx = (sy + ty) * screenW + (sx + tx)
                 val tIdx = ty * tplW + tx
 
-                grayDiffSum += abs(screenGray[sIdx] - tplGray[tIdx]).toFloat()
+                grayDiffSum += abs(screenGray[sIdx] - tplGray[tIdx]).toFloat() * weight
 
                 val sp = screenPixels[sIdx]; val tp = tplPixels[tIdx]
-                rDiffSum += abs((sp shr 16 and 0xFF) - (tp shr 16 and 0xFF)).toFloat()
-                gDiffSum += abs((sp shr 8  and 0xFF) - (tp shr 8  and 0xFF)).toFloat()
-                bDiffSum += abs((sp        and 0xFF) - (tp        and 0xFF)).toFloat()
+                rDiffSum += abs((sp shr 16 and 0xFF) - (tp shr 16 and 0xFF)).toFloat() * weight
+                gDiffSum += abs((sp shr 8  and 0xFF) - (tp shr 8  and 0xFF)).toFloat() * weight
+                bDiffSum += abs((sp        and 0xFF) - (tp        and 0xFF)).toFloat() * weight
+                weightSum += weight
             }
         }
 
-        val grayScore  = 1f - (grayDiffSum / count / 255f)
-        // R kanali ayri normalize - 2x agirlik icin dogru normalizasyon
-        val rScore = 1f - (rDiffSum / count / 255f)
-        val gScore = 1f - (gDiffSum / count / 255f)
-        val bScore = 1f - (bDiffSum / count / 255f)
-        // R kanalina 2x agirlik, G ve B esit
+        val w = weightSum.coerceAtLeast(1f)
+        val grayScore = 1f - (grayDiffSum / w / 255f)
+        val rScore    = 1f - (rDiffSum    / w / 255f)
+        val gScore    = 1f - (gDiffSum    / w / 255f)
+        val bScore    = 1f - (bDiffSum    / w / 255f)
+        // R kanalina 2x agirlik - kirmizi/kahverengi ayrimi
         val colorScore = (rScore * 2f + gScore + bScore) / 4f
 
         return grayScore * 0.35f + colorScore * 0.65f
