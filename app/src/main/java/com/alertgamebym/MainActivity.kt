@@ -310,19 +310,7 @@ private fun MainScreen() {
                 Text("Süreyi Kaydet")
             }
 
-            OutlinedButton(
-                onClick = {
-                    ContextCompat.startForegroundService(
-                        context,
-                        Intent(context, BubbleOverlayService::class.java).apply {
-                            action = BubbleOverlayService.ACTION_RESET_TIMER
-                        }
-                    )
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Süreyi Sıfırla")
-            }
+
         }
 
         HorizontalDivider()
