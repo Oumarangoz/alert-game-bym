@@ -135,10 +135,6 @@ class BubbleOverlayService : Service() {
         if (log) AppLog.add("AUTO: state sıfırlandı")
     }
 
-    private fun resetCollectTimer(log: Boolean) {
-        itemMissCount = 0
-        if (log) AppLog.add("AUTO: süre sayacı sıfırlandı")
-    }
 
     private fun baseOverlayFlags(): Int {
         return WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
