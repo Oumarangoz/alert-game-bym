@@ -37,12 +37,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,8 +85,6 @@ private fun MainScreen() {
     val roiX2 by ControlCenter.itemRoiX2.collectAsState()
     val roiY2 by ControlCenter.itemRoiY2.collectAsState()
     val scope = rememberCoroutineScope()
-
-    var hitCount by remember { mutableIntStateOf(0) }
 
     var itemInput by remember { mutableStateOf("") }
     var items by remember { mutableStateOf(ItemRulesStore.getItems(context)) }
@@ -398,12 +394,11 @@ private fun MainScreen() {
             ) {
                 Button(
                     onClick = {
-                        hitCount += 1
-                        AppLog.add("HEDEF: Merkez butonu tıklandı. sayaç=$hitCount")
+                        AppLog.add("HEDEF: Merkez butonu tıklandı")
                     },
                     modifier = Modifier.size(width = 220.dp, height = 90.dp)
                 ) {
-                    Text("MERKEZ TEST HEDEFİ\nSayaç: $hitCount")
+                    Text("MERKEZ TEST HEDEFİ")
                 }
             }
         }

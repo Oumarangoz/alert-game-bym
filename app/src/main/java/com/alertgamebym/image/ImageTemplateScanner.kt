@@ -217,11 +217,13 @@ object ImageTemplateScanner {
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
             val rowPadding = rowStride - pixelStride * width
-            val bitmap = Bitmap.createBitmap(
+            val raw = Bitmap.createBitmap(
                 width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888
             )
-            bitmap.copyPixelsFromBuffer(buffer)
-            return Bitmap.createBitmap(bitmap, 0, 0, width, height)
+            raw.copyPixelsFromBuffer(buffer)
+            val cropped = Bitmap.createBitmap(raw, 0, 0, width, height)
+            raw.recycle() // ara bitmap leak onle
+            return cropped
         }
     }
 

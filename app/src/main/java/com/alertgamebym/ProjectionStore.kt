@@ -6,9 +6,9 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 
 object ProjectionStore {
-    var resultCode: Int? = null
-    var dataIntent: Intent? = null
-    private var cachedProjection: MediaProjection? = null
+    @Volatile var resultCode: Int? = null
+    @Volatile var dataIntent: Intent? = null
+    @Volatile private var cachedProjection: MediaProjection? = null
 
     fun isReady(): Boolean = resultCode != null && dataIntent != null
 

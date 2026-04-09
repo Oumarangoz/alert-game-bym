@@ -25,6 +25,7 @@ object AppLog {
 
     @Volatile private var logDir: File? = null
     @Volatile private var writerStarted = false
+    private val writerLock = Any()
 
     fun bind(context: Context) {
         val dir = context.applicationContext.filesDir
@@ -34,8 +35,10 @@ object AppLog {
     }
 
     private fun startWriter() {
-        if (writerStarted) return
-        writerStarted = true
+        synchronized(writerLock) {
+            if (writerStarted) return
+            writerStarted = true
+        }
         ioScope.launch {
             val dir = logDir ?: return@launch
             val file = File(dir, "log.txt")

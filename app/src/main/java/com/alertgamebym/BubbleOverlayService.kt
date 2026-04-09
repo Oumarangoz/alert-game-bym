@@ -71,9 +71,9 @@ class BubbleOverlayService : Service() {
     @Volatile private var state2MissCount = 0
 
  // Phase bazli antispam - STATE1/STATE2 birbirini engellemez
- private val phaseTapX = mutableMapOf<String, Float>()
- private val phaseTapY = mutableMapOf<String, Float>()
- private val phaseTapAt = mutableMapOf<String, Long>()
+ private val phaseTapX = java.util.concurrent.ConcurrentHashMap<String, Float>()
+ private val phaseTapY = java.util.concurrent.ConcurrentHashMap<String, Float>()
+ private val phaseTapAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
 
     companion object {
@@ -593,29 +593,29 @@ class BubbleOverlayService : Service() {
             PixelFormat.TRANSPARENT
         ).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 0 }
 
-        // Sol-ust kose (◤)
-        val (h1, lp1) = createRoiHandle(
-            symbol = "◤", initX = initX1 - half, initY = initY1 - half, size = handleSize
-        ) { cx, cy ->
-            ControlCenter.setItemRoi(cx, cy, ControlCenter.itemRoiX2.value, ControlCenter.itemRoiY2.value)
-            drawView.postInvalidate()
-        }
-
-        // Sag-alt kose (◢)
-        val (h2, lp2) = createRoiHandle(
-            symbol = "◢", initX = initX2 - half, initY = initY2 - half, size = handleSize
-        ) { cx, cy ->
-            ControlCenter.setItemRoi(ControlCenter.itemRoiX1.value, ControlCenter.itemRoiY1.value, cx, cy)
-            drawView.postInvalidate()
-        }
-
-        // Kayitli ROI pozisyon yukle
+        // Kayitli ROI pozisyon yukle - handle pozisyonlari da kayitli degerle baslasin
         val roiPrefs = getSharedPreferences("overlay_pos", MODE_PRIVATE)
         val rx1 = roiPrefs.getFloat("roi_x1", initX1.toFloat())
         val ry1 = roiPrefs.getFloat("roi_y1", initY1.toFloat())
         val rx2 = roiPrefs.getFloat("roi_x2", initX2.toFloat())
         val ry2 = roiPrefs.getFloat("roi_y2", initY2.toFloat())
         ControlCenter.setItemRoi(rx1, ry1, rx2, ry2)
+
+        // Sol-ust kose (◤) - kayitli pozisyondan baslat
+        val (h1, lp1) = createRoiHandle(
+            symbol = "◤", initX = (rx1 - half).toInt(), initY = (ry1 - half).toInt(), size = handleSize
+        ) { cx, cy ->
+            ControlCenter.setItemRoi(cx, cy, ControlCenter.itemRoiX2.value, ControlCenter.itemRoiY2.value)
+            drawView.postInvalidate()
+        }
+
+        // Sag-alt kose (◢) - kayitli pozisyondan baslat
+        val (h2, lp2) = createRoiHandle(
+            symbol = "◢", initX = (rx2 - half).toInt(), initY = (ry2 - half).toInt(), size = handleSize
+        ) { cx, cy ->
+            ControlCenter.setItemRoi(ControlCenter.itemRoiX1.value, ControlCenter.itemRoiY1.value, cx, cy)
+            drawView.postInvalidate()
+        }
 
         runCatching {
             windowManager.addView(drawView, drawLp)

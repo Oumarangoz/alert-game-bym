@@ -49,11 +49,6 @@ object OcrDebugScanner {
         cachedH = 0
     }
 
-    suspend fun scan(context: Context): List<OcrLine> {
-        val dm = context.resources.displayMetrics
-        return scanRegion(context, 0, 0, dm.widthPixels, dm.heightPixels)
-    }
-
     suspend fun scanRegion(
         context: Context,
         roiX1: Int, roiY1: Int,
@@ -166,11 +161,13 @@ object OcrDebugScanner {
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
             val rowPadding = rowStride - pixelStride * width
-            val bitmap = Bitmap.createBitmap(
+            val raw = Bitmap.createBitmap(
                 width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888
             )
-            bitmap.copyPixelsFromBuffer(buffer)
-            return Bitmap.createBitmap(bitmap, 0, 0, width, height)
+            raw.copyPixelsFromBuffer(buffer)
+            val cropped = Bitmap.createBitmap(raw, 0, 0, width, height)
+            raw.recycle() // ara bitmap leak onle
+            return cropped
         }
     }
 
