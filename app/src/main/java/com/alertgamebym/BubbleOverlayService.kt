@@ -1155,6 +1155,7 @@ private fun refreshBubble() {
         scope.cancel()
         mainScope.cancel()
         com.alertgamebym.ocr.OcrDebugScanner.invalidateCache()
+        com.alertgamebym.image.ImageTemplateScanner.invalidateCache()
         AppLog.add("BUBBLE: servis kapandı")
         super.onDestroy()
     }

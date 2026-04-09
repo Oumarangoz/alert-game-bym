@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
 import android.media.Image
 import android.media.ImageReader
 import android.net.Uri
@@ -26,6 +27,21 @@ data class TemplateMatch(
 
 object ImageTemplateScanner {
 
+    // VirtualDisplay cache - her cagirda yeniden olusturma
+    @Volatile private var cachedReader: ImageReader? = null
+    @Volatile private var cachedVd: VirtualDisplay? = null
+    @Volatile private var cachedW = 0
+    @Volatile private var cachedH = 0
+
+    fun invalidateCache() {
+        runCatching { cachedVd?.release() }
+        runCatching { cachedReader?.close() }
+        cachedVd = null
+        cachedReader = null
+        cachedW = 0
+        cachedH = 0
+    }
+
     suspend fun findBestMatch(
         context: Context,
         templateUri: Uri,
@@ -36,10 +52,14 @@ object ImageTemplateScanner {
         radiusY: Int = 220,
         fullScreen: Boolean = false
     ): TemplateMatch? {
-        val screen = captureScreenBitmap(context)
-        val templateOriginal = loadTemplateBitmap(context, templateUri) ?: return null
+        val screen = captureScreenBitmap(context) ?: return null
+        val templateOriginal = loadTemplateBitmap(context, templateUri) ?: run {
+            screen.recycle()
+            return null
+        }
 
-        val factor = min(1f, 540f / screen.width.toFloat())
+        // Ekrani 720px genislige scale et (540 yerine - daha fazla detay)
+        val factor = min(1f, 720f / screen.width.toFloat())
 
         val screenScaled = if (factor < 1f) {
             Bitmap.createScaledBitmap(
@@ -48,9 +68,7 @@ object ImageTemplateScanner {
                 max((screen.height * factor).toInt(), 1),
                 true
             )
-        } else {
-            screen
-        }
+        } else screen
 
         val templateBase = if (factor < 1f) {
             Bitmap.createScaledBitmap(
@@ -59,9 +77,7 @@ object ImageTemplateScanner {
                 max((templateOriginal.height * factor).toInt(), 12),
                 true
             )
-        } else {
-            templateOriginal
-        }
+        } else templateOriginal
 
         val screenGray = toGray(screenScaled)
         val screenPixels = toPixels(screenScaled)
@@ -72,7 +88,9 @@ object ImageTemplateScanner {
         val scaledRy = max((radiusY * factor).toInt(), 24)
 
         var best: TemplateMatch? = null
-        val scales = listOf(0.90f, 1.00f, 1.10f)
+
+        // Daha genis scale araligi - oyun UI degisikliklerine karsi
+        val scales = listOf(0.80f, 0.90f, 1.00f, 1.10f, 1.20f)
 
         for (scale in scales) {
             val tw = max((templateBase.width * scale).toInt(), 12)
@@ -86,14 +104,11 @@ object ImageTemplateScanner {
             val tplGray = toGray(tpl)
             val tplPixels = toPixels(tpl)
 
-            val xStart: Int
-            val yStart: Int
-            val xEnd: Int
-            val yEnd: Int
+            val xStart: Int; val yStart: Int
+            val xEnd: Int;   val yEnd: Int
 
             if (fullScreen) {
-                xStart = 0
-                yStart = 0
+                xStart = 0; yStart = 0
                 xEnd = screenScaled.width - tw
                 yEnd = screenScaled.height - th
             } else {
@@ -104,21 +119,15 @@ object ImageTemplateScanner {
             }
 
             if (xEnd >= xStart && yEnd >= yStart) {
-                val step = 3
+                // step=2: daha hassas tarama (3 yerine)
+                val step = 2
                 var y = yStart
                 while (y <= yEnd) {
                     var x = xStart
                     while (x <= xEnd) {
                         val similarity = scoreAt(
-                            screenGray = screenGray,
-                            screenPixels = screenPixels,
-                            screenW = screenScaled.width,
-                            sx = x,
-                            sy = y,
-                            tplGray = tplGray,
-                            tplPixels = tplPixels,
-                            tplW = tw,
-                            tplH = th
+                            screenGray, screenPixels, screenScaled.width,
+                            x, y, tplGray, tplPixels, tw, th
                         )
 
                         val finalScore = if (fullScreen) {
@@ -128,7 +137,8 @@ object ImageTemplateScanner {
                             val cy = y + th / 2
                             val dist = hypot((cx - scaledCx).toFloat(), (cy - scaledCy).toFloat())
                             val maxDist = hypot(scaledRx.toFloat(), scaledRy.toFloat()).coerceAtLeast(1f)
-                            similarity - ((dist / maxDist) * 0.16f)
+                            // Penalty 0.16 -> 0.08 (daha az ceza, uzaktaki gercek eslesme kaybolmasin)
+                            similarity - ((dist / maxDist) * 0.08f)
                         }
 
                         if (best == null || finalScore > best!!.confidence) {
@@ -159,38 +169,41 @@ object ImageTemplateScanner {
         return best
     }
 
-    private suspend fun captureScreenBitmap(context: Context): Bitmap {
-        val projection = ProjectionStore.getProjection(context)
+    private suspend fun captureScreenBitmap(context: Context): Bitmap? {
+        return try {
+            val projection = ProjectionStore.getProjection(context)
+            val dm = context.resources.displayMetrics
+            val width = dm.widthPixels
+            val height = dm.heightPixels
+            val density = dm.densityDpi
 
-        val dm = context.resources.displayMetrics
-        val width = dm.widthPixels
-        val height = dm.heightPixels
-        val density = dm.densityDpi
-
-        val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-        val vd = projection.createVirtualDisplay(
-            "img-template-scan",
-            width,
-            height,
-            density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            reader.surface,
-            null,
-            null
-        )
-
-        try {
-            repeat(12) {
-                val image = reader.acquireLatestImage()
-                if (image != null) {
-                    return imageToBitmap(image, width, height)
-                }
-                delay(120)
+            // Cache kontrol
+            var reader = cachedReader
+            var vd = cachedVd
+            if (reader == null || vd == null || cachedW != width || cachedH != height) {
+                runCatching { vd?.release() }
+                runCatching { reader?.close() }
+                reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+                vd = projection.createVirtualDisplay(
+                    "img-template-scan", width, height, density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    reader.surface, null, null
+                )
+                cachedReader = reader
+                cachedVd = vd
+                cachedW = width
+                cachedH = height
             }
-            throw IllegalStateException("Ekran görüntüsü alınamadı")
-        } finally {
-            runCatching { reader.close() }
-            runCatching { vd.release() }
+
+            repeat(15) {
+                val image = reader!!.acquireLatestImage()
+                if (image != null) return imageToBitmap(image, width, height)
+                delay(80)
+            }
+            null
+        } catch (e: Exception) {
+            invalidateCache()
+            null
         }
     }
 
@@ -201,11 +214,8 @@ object ImageTemplateScanner {
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
             val rowPadding = rowStride - pixelStride * width
-
             val bitmap = Bitmap.createBitmap(
-                width + rowPadding / pixelStride,
-                height,
-                Bitmap.Config.ARGB_8888
+                width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888
             )
             bitmap.copyPixelsFromBuffer(buffer)
             return Bitmap.createBitmap(bitmap, 0, 0, width, height)
@@ -213,91 +223,68 @@ object ImageTemplateScanner {
     }
 
     private fun loadTemplateBitmap(context: Context, uri: Uri): Bitmap? {
-        return context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it)
-        }
+        return runCatching {
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it)
+            }
+        }.getOrNull()
     }
 
     private fun toGray(bitmap: Bitmap): IntArray {
-        val w = bitmap.width
-        val h = bitmap.height
+        val w = bitmap.width; val h = bitmap.height
         val pixels = IntArray(w * h)
         bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-        val out = IntArray(w * h)
-        for (i in pixels.indices) {
+        return IntArray(w * h) { i ->
             val p = pixels[i]
-            val r = (p shr 16) and 0xFF
-            val g = (p shr 8) and 0xFF
-            val b = p and 0xFF
-            out[i] = (r * 30 + g * 59 + b * 11) / 100
+            ((p shr 16 and 0xFF) * 30 + (p shr 8 and 0xFF) * 59 + (p and 0xFF) * 11) / 100
         }
-        return out
     }
 
     private fun toPixels(bitmap: Bitmap): IntArray {
-        val w = bitmap.width
-        val h = bitmap.height
+        val w = bitmap.width; val h = bitmap.height
         val out = IntArray(w * h)
         bitmap.getPixels(out, 0, w, 0, 0, w, h)
         return out
     }
 
     private fun scoreAt(
-        screenGray: IntArray,
-        screenPixels: IntArray,
-        screenW: Int,
-        sx: Int,
-        sy: Int,
-        tplGray: IntArray,
-        tplPixels: IntArray,
-        tplW: Int,
-        tplH: Int
+        screenGray: IntArray, screenPixels: IntArray, screenW: Int,
+        sx: Int, sy: Int,
+        tplGray: IntArray, tplPixels: IntArray,
+        tplW: Int, tplH: Int
     ): Float {
-        val sampleCols = 14
-        val sampleRows = 14
+        val sampleCols = 16
+        val sampleRows = 16
         var grayDiffSum = 0f
-        var colorDiffSum = 0f
-        var count = 0
+        var rDiffSum = 0f
+        var gDiffSum = 0f
+        var bDiffSum = 0f
+        val count = sampleCols * sampleRows
 
         for (ry in 0 until sampleRows) {
             val ty = if (sampleRows == 1) 0 else (ry * (tplH - 1)) / (sampleRows - 1)
             for (rx in 0 until sampleCols) {
                 val tx = if (sampleCols == 1) 0 else (rx * (tplW - 1)) / (sampleCols - 1)
+                val sIdx = (sy + ty) * screenW + (sx + tx)
+                val tIdx = ty * tplW + tx
 
-                val sIndex = (sy + ty) * screenW + (sx + tx)
-                val tIndex = ty * tplW + tx
+                grayDiffSum += abs(screenGray[sIdx] - tplGray[tIdx]).toFloat()
 
-                val sg = screenGray[sIndex]
-                val tg = tplGray[tIndex]
-                grayDiffSum += abs(sg - tg).toFloat()
-
-                val sp = screenPixels[sIndex]
-                val tp = tplPixels[tIndex]
-
-                val sr = (sp shr 16) and 0xFF
-                val sgc = (sp shr 8) and 0xFF
-                val sb = sp and 0xFF
-
-                val tr = (tp shr 16) and 0xFF
-                val tgc = (tp shr 8) and 0xFF
-                val tb = tp and 0xFF
-
-                colorDiffSum += (
-                    abs(sr - tr) * 2 +
-                    abs(sgc - tgc) +
-                    abs(sb - tb)
-                ).toFloat()
-
-                count++
+                val sp = screenPixels[sIdx]; val tp = tplPixels[tIdx]
+                rDiffSum += abs((sp shr 16 and 0xFF) - (tp shr 16 and 0xFF)).toFloat()
+                gDiffSum += abs((sp shr 8  and 0xFF) - (tp shr 8  and 0xFF)).toFloat()
+                bDiffSum += abs((sp        and 0xFF) - (tp        and 0xFF)).toFloat()
             }
         }
 
-        val grayAvg = grayDiffSum / count
-        val colorAvg = colorDiffSum / count
+        val grayScore  = 1f - (grayDiffSum / count / 255f)
+        // R kanali ayri normalize - 2x agirlik icin dogru normalizasyon
+        val rScore = 1f - (rDiffSum / count / 255f)
+        val gScore = 1f - (gDiffSum / count / 255f)
+        val bScore = 1f - (bDiffSum / count / 255f)
+        // R kanalina 2x agirlik, G ve B esit
+        val colorScore = (rScore * 2f + gScore + bScore) / 4f
 
-        val grayScore = 1f - (grayAvg / 255f)
-        val colorScore = 1f - (colorAvg / (255f * 3f))
-
-        return grayScore * 0.40f + colorScore * 0.60f
+        return grayScore * 0.35f + colorScore * 0.65f
     }
 }
