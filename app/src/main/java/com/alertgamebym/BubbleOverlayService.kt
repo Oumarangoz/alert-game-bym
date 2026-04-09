@@ -285,26 +285,38 @@ class BubbleOverlayService : Service() {
                     }
 
                     AutoPhase.TAP_ITEM -> {
-                        // Item yazisina tikla
+                        // Item yazisina araliksiz tikla
                         val foundQuery = performItemOcrTap(
                             itemQueries = items,
                             logPrefix = "AUTO-I",
-                            silentNoMatch = false,
+                            silentNoMatch = true,
                             tapOffsetX = tapOffsetX,
                             tapOffsetY = tapOffsetY,
                             tapAll = tapAll
                         )
                         if (foundQuery != null) {
-                            AppLog.add("AUTO: ITEM alindi -> '$foundQuery' - 1sn sonra STATE2")
-                            delay(1000)
+                            // Bulundu - araliksiz tikla, yazı silinene kadar devam
+                            AppLog.add("AUTO-I: ITEM -> '$foundQuery' tikliyorum")
                             itemMissCount = 0
-                            autoPhase = AutoPhase.FIND_STATE2
+                            // delay yok - hemen tekrar OCR
                         } else {
                             itemMissCount += 1
-                            if (itemMissCount % 10 == 1) {
-                                AppLog.add("AUTO-I: item bekleniyor (${itemMissCount}. deneme)")
+                            if (itemMissCount >= 3) {
+                                // 3 kez bulunamadi = yazi silindi
+                                AppLog.add("AUTO-I: yazi silindi, 15sn sonra kirmiziya tikla")
+                                itemMissCount = 0
+                                delay(15000)
+                                performSingleRefTap(
+                                    key = ReferenceStore.KEY_STATE1,
+                                    label = "STATE1",
+                                    logPrefix = "AUTO-R",
+                                    silentNoMatch = false,
+                                    minConf = minConf,
+                                    cachedUri = cachedRef1
+                                )
+                                AppLog.add("AUTO-R: 15sn kirmizi tiklandi")
                             }
-                            delay(300)
+                            // delay yok - hemen tekrar
                         }
                     }
 

@@ -43,6 +43,18 @@ object SettingsStore {
     }
 
 
+    private const val KEY_WAIT_MS = "wait_ms"
+
+    fun getWaitMs(context: Context): Long {
+        return context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getLong(KEY_WAIT_MS, 30000L).coerceIn(5000L, 120000L)
+    }
+
+    fun saveWaitMs(context: Context, value: Long) {
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .edit().putLong(KEY_WAIT_MS, value.coerceIn(5000L, 120000L)).apply()
+    }
+
     // Tum ROI yazilarina tikla (true) veya sadece eslesen iteme (false)
     private const val KEY_TAP_ALL = "tap_all_items"
 
