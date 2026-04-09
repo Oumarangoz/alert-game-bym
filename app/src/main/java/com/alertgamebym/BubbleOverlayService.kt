@@ -119,10 +119,6 @@ class BubbleOverlayService : Service() {
                 return START_STICKY
             }
 
-            ACTION_RESET_TIMER -> {
-                resetCollectTimer(log = true)
-                return START_STICKY
-            }
         }
 
         createOverlays()
