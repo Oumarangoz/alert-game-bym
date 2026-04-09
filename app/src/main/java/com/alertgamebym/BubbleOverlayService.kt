@@ -252,6 +252,7 @@ class BubbleOverlayService : Service() {
                                     fullScreen = false
                                 )
                             }
+                            AppLog.add("DEBUG-CONF: conf=${m?.confidence ?: -1f} threshold=$minConf match=${m != null}")
                             val result = m != null && m.confidence >= minConf
                             withContext(Dispatchers.Main) { restoreTransientOverlaysKeepBubble(); refreshBubble() }
                             result
