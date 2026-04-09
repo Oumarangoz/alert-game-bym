@@ -92,11 +92,9 @@ private fun MainScreen() {
 
     var itemInput by remember { mutableStateOf("") }
     var items by remember { mutableStateOf(ItemRulesStore.getItems(context)) }
-    var timeoutText by remember { mutableStateOf(ItemRulesStore.getTimeoutSeconds(context).toString()) }
     var minConfText by remember { mutableStateOf((SettingsStore.getMinConf(context) * 100).toInt().toString()) }
     var tapOffsetXText by remember { mutableStateOf(SettingsStore.getTapOffsetX(context).toString()) }
     var tapOffsetYText by remember { mutableStateOf(SettingsStore.getTapOffsetY(context).toString()) }
-    var waitSecText by remember { mutableStateOf((SettingsStore.getWaitMs(context) / 1000L).toString()) }
     var tapAllMode by remember { mutableStateOf(SettingsStore.getTapAll(context)) }
 
     val projectionLauncher = rememberLauncherForActivityResult(
@@ -176,7 +174,6 @@ private fun MainScreen() {
         Text("Ref1: ${if (ReferenceStore.has(context, ReferenceStore.KEY_STATE1)) "hazır" else "yok"}")
         Text("Ref2: ${if (ReferenceStore.has(context, ReferenceStore.KEY_STATE2)) "hazır" else "yok"}")
         Text("İtem sayısı: ${items.size}")
-        Text("Süre sınırı: ${ItemRulesStore.getTimeoutSeconds(context)} sn")
 
         Button(
             onClick = {
@@ -289,29 +286,6 @@ private fun MainScreen() {
             }
         }
 
-        OutlinedTextField(
-            value = timeoutText,
-            onValueChange = { timeoutText = it.filter { ch -> ch.isDigit() } },
-            label = { Text("Süre sınırı (sn)") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = {
-                    val sec = timeoutText.toIntOrNull()?.coerceIn(1, 300) ?: 10
-                    ItemRulesStore.saveTimeoutSeconds(context, sec)
-                    timeoutText = sec.toString()
-                    AppLog.add("ITEM TIMER: kaydedildi -> ${sec} sn")
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Süreyi Kaydet")
-            }
-
-
-        }
 
         HorizontalDivider()
         Text("Gelişmiş Ayarlar", style = MaterialTheme.typography.titleMedium)
@@ -334,11 +308,6 @@ private fun MainScreen() {
             OutlinedButton(onClick = { val v=(tapOffsetYText.toIntOrNull()?:0)+1; tapOffsetYText=v.coerceIn(-200,200).toString(); SettingsStore.saveTapOffsetY(context,tapOffsetYText.toInt()) }) { Text("+") }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Text("Item Bekleme: ${waitSecText}sn", modifier = Modifier.weight(1f))
-            OutlinedButton(onClick = { val v=(waitSecText.toLongOrNull()?:5L)-1L; waitSecText=v.coerceIn(1L,60L).toString(); SettingsStore.saveWaitMs(context,waitSecText.toLong()*1000L) }) { Text("-") }
-            OutlinedButton(onClick = { val v=(waitSecText.toLongOrNull()?:5L)+1L; waitSecText=v.coerceIn(1L,60L).toString(); SettingsStore.saveWaitMs(context,waitSecText.toLong()*1000L) }) { Text("+") }
-        }
 
         // Tikla modu: Tek item (eslesen) veya Tum ROI
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {

@@ -5,7 +5,6 @@ import android.content.Context
 object ItemRulesStore {
     private const val PREF = "item_rules_store"
     private const val KEY_ITEMS = "items"
-    private const val KEY_TIMEOUT = "timeout_seconds"
 
     fun getItems(context: Context): List<String> {
         val set = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -40,16 +39,4 @@ object ItemRulesStore {
             .apply()
     }
 
-    fun getTimeoutSeconds(context: Context): Int {
-        return context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-            .getInt(KEY_TIMEOUT, 10)
-            .coerceIn(1, 300)
-    }
-
-    fun saveTimeoutSeconds(context: Context, seconds: Int) {
-        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(KEY_TIMEOUT, seconds.coerceIn(1, 300))
-            .apply()
-    }
 }

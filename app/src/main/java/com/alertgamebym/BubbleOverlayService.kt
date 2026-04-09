@@ -23,7 +23,6 @@ import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import com.alertgamebym.accessibility.TapAccessibilityService
 import com.alertgamebym.image.ImageTemplateScanner
-import com.alertgamebym.image.TemplateMatch
 import com.alertgamebym.ocr.OcrDebugScanner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +35,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.hypot
-import kotlin.math.min
 
 class BubbleOverlayService : Service() {
 
@@ -57,12 +55,9 @@ class BubbleOverlayService : Service() {
     private var roiHandle2Params: WindowManager.LayoutParams? = null
 
     // Main: UI guncellemeleri, Default: agir isler (bitmap, OCR, template)
-    private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var autoJob: Job? = null
 
-    @Volatile
-    private var busy = false
 
     private enum class AutoPhase {
         WAIT_FOR_ITEM,
@@ -73,7 +68,6 @@ class BubbleOverlayService : Service() {
 
     private var autoPhase = AutoPhase.WAIT_FOR_ITEM
     private var itemMissCount = 0
-    private var state1MissCount = 0
     private var state2MissCount = 0
 
  // Phase bazli antispam - STATE1/STATE2 birbirini engellemez
@@ -129,7 +123,6 @@ class BubbleOverlayService : Service() {
     private fun resetAutoState(log: Boolean) {
         autoPhase = AutoPhase.WAIT_FOR_ITEM
         itemMissCount = 0
-        state1MissCount = 0
         state2MissCount = 0
   clearTapLocks()
         if (log) AppLog.add("AUTO: state sıfırlandı")
@@ -216,11 +209,9 @@ class BubbleOverlayService : Service() {
             return
         }
 
-        val timeoutSec = ItemRulesStore.getTimeoutSeconds(this)
         val minConf = SettingsStore.getMinConf(this)
         val tapOffsetX = SettingsStore.getTapOffsetX(this)
         val tapOffsetY = SettingsStore.getTapOffsetY(this)
-        val waitMs = SettingsStore.getWaitMs(this)
         val tapAll = SettingsStore.getTapAll(this)
 
         resetAutoState(log = false)
@@ -228,9 +219,8 @@ class BubbleOverlayService : Service() {
         autoJob = scope.launch {
             AppLog.add("AUTO: loop başladı")
             AppLog.add("AUTO: ITEM-LIST -> ${items.size} kayıt")
-            AppLog.add("AUTO: süre sınırı -> ${timeoutSec} sn")
             AppLog.add("AUTO: IKON ROI x=${ControlCenter.targetX.value.toInt()} y=${ControlCenter.targetY.value.toInt()} r=${ICON_RADIUS_X}x${ICON_RADIUS_Y} | ITEM ROI x1=${ControlCenter.itemRoiX1.value.toInt()} y1=${ControlCenter.itemRoiY1.value.toInt()} x2=${ControlCenter.itemRoiX2.value.toInt()} y2=${ControlCenter.itemRoiY2.value.toInt()}")
-            AppLog.add("AUTO: conf=${minConf} offsetX=${tapOffsetX} offsetY=${tapOffsetY} wait=${waitMs}ms")
+            AppLog.add("AUTO: conf=${minConf} offsetX=${tapOffsetX} offsetY=${tapOffsetY}")
 
             while (isActive && ControlCenter.bubbleRunning.value) {
                 when (autoPhase) {
@@ -696,20 +686,6 @@ class BubbleOverlayService : Service() {
 
 
 
-    private fun moveTargetMarker(centerX: Int, centerY: Int) {
-        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
-            mainScope.launch { moveTargetMarker(centerX, centerY) }
-            return
-        }
-
-        val lp = targetParams ?: return
-        val v = targetView ?: return
-        lp.x = centerX - 60
-        lp.y = centerY - 60
-        ControlCenter.setTarget(centerX.toFloat(), centerY.toFloat())
-        runCatching { windowManager.updateViewLayout(v, lp) }
-        AppLog.add("TARGET: auto x=$centerX y=$centerY")
-    }
 
     private suspend fun performTapAt(xRaw: Float, yRaw: Float, prefix: String, skipHide: Boolean = false): Boolean {
         if (!TapAccessibilityService.isAvailable()) {
@@ -856,85 +832,6 @@ class BubbleOverlayService : Service() {
         }
     }
 
-    private suspend fun performSingleImageDebugTap(logPrefix: String): Boolean {
-        if (busy) return false
-        busy = true
-
-        return try {
-            val matches = mutableListOf<TemplateMatch>()
-            val ref1 = ReferenceStore.get(this, ReferenceStore.KEY_STATE1)
-            val ref2 = ReferenceStore.get(this, ReferenceStore.KEY_STATE2)
-            val roiX = ControlCenter.targetX.value.toInt()
-            val roiY = ControlCenter.targetY.value.toInt()
-
-            withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }
-            AppLog.add("$logPrefix: overlays hidden")
-            delay(220)
-
-            if (ref1 != null) {
-                withContext(Dispatchers.Default) {
-                    ImageTemplateScanner.findBestMatch(
-                        this@BubbleOverlayService,
-                        ref1,
-                        "STATE1",
-                        centerX = roiX,
-                        centerY = roiY,
-                        radiusX = ICON_RADIUS_X,
-                        radiusY = ICON_RADIUS_Y,
-                        fullScreen = false
-                    )
-                }?.let {
-                    AppLog.add("${logPrefix}1: conf=${"%.2f".format(it.confidence)} x=${it.centerX} y=${it.centerY}")
-                    matches += it
-                }
-            }
-
-            if (ref2 != null) {
-                withContext(Dispatchers.Default) {
-                    ImageTemplateScanner.findBestMatch(
-                        this@BubbleOverlayService,
-                        ref2,
-                        "STATE2",
-                        centerX = roiX,
-                        centerY = roiY,
-                        radiusX = ICON_RADIUS_X,
-                        radiusY = ICON_RADIUS_Y,
-                        fullScreen = false
-                    )
-                }?.let {
-                    AppLog.add("${logPrefix}2: conf=${"%.2f".format(it.confidence)} x=${it.centerX} y=${it.centerY}")
-                    matches += it
-                }
-            }
-
-            withContext(Dispatchers.Main) {
-                restoreTransientOverlaysKeepBubble()
-                refreshBubble()
-            }
-            AppLog.add("$logPrefix: overlays restored")
-
-            val best = matches.maxByOrNull { it.confidence } ?: return false
-            val dynConf = runCatching { SettingsStore.getMinConf(this) }.getOrDefault(ICON_MIN_CONF)
-            if (best.confidence < dynConf) {
-                AppLog.add("$logPrefix: zayif conf=${"%.2f".format(best.confidence)} min=${"%.2f".format(dynConf)}")
-                return false
-            }
-
-            AppLog.add("$logPrefix: best=${best.label} conf=${"%.2f".format(best.confidence)} @(${best.centerX}, ${best.centerY})")
-            moveTargetMarker(best.centerX, best.centerY)
-            performTapAt(best.centerX.toFloat(), best.centerY.toFloat(), logPrefix)
-        } catch (t: Throwable) {
-            withContext(Dispatchers.Main) {
-                restoreTransientOverlaysKeepBubble()
-                refreshBubble()
-            }
-            AppLog.add("$logPrefix: overlays restored")
-            AppLog.add("$logPrefix: hata: ${t.message ?: "bilinmeyen hata"}")
-            false
-        } finally {
-            busy = false
-        }
-    }
 
     private suspend fun performItemOcrTap(
         itemQueries: List<String>,
@@ -1134,7 +1031,6 @@ private fun refreshBubble() {
         roiHandle2View = null; roiHandle2Params = null
         roiDrawView = null; roiDrawParams = null
         scope.cancel()
-        mainScope.cancel()
         com.alertgamebym.ocr.OcrDebugScanner.invalidateCache()
         com.alertgamebym.image.ImageTemplateScanner.invalidateCache()
         AppLog.add("BUBBLE: servis kapandı")

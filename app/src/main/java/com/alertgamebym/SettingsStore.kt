@@ -7,7 +7,6 @@ object SettingsStore {
     private const val KEY_MIN_CONF   = "min_conf"
     private const val KEY_TAP_OFFSET_X = "tap_offset_x"
     private const val KEY_TAP_OFFSET_Y = "tap_offset_y"
-    private const val KEY_WAIT_MS    = "wait_ms"
 
     // Güven skoru: 0.60 - 0.95, varsayilan 0.80
     fun getMinConf(context: Context): Float {
@@ -43,16 +42,6 @@ object SettingsStore {
             .edit().putInt(KEY_TAP_OFFSET_Y, value.coerceIn(-200, 200)).apply()
     }
 
-    // Item bekleme suresi (ms): 1000 - 15000, varsayilan 5000
-    fun getWaitMs(context: Context): Long {
-        return context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-            .getLong(KEY_WAIT_MS, 5000L).coerceIn(1000L, 60000L)
-    }
-
-    fun saveWaitMs(context: Context, value: Long) {
-        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-            .edit().putLong(KEY_WAIT_MS, value.coerceIn(1000L, 60000L)).apply()
-    }
 
     // Tum ROI yazilarina tikla (true) veya sadece eslesen iteme (false)
     private const val KEY_TAP_ALL = "tap_all_items"
