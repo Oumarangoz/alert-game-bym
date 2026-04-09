@@ -188,7 +188,7 @@ class BubbleOverlayService : Service() {
         applyOverlayState(targetView, targetParams, false, false)
         applyOverlayState(roiHandle1View, roiHandle1Params, false, false)
         applyOverlayState(roiHandle2View, roiHandle2Params, false, false)
-        applyOverlayState(roiDrawView, roiDrawParams, false, false)
+        roiDrawView?.visibility = android.view.View.INVISIBLE
         applyOverlayState(bubbleView, bubbleParams, true, true)
     }
 
@@ -196,10 +196,11 @@ class BubbleOverlayService : Service() {
         applyOverlayState(targetView, targetParams, true, true)
         applyOverlayState(roiHandle1View, roiHandle1Params, true, true)
         applyOverlayState(roiHandle2View, roiHandle2Params, true, true)
-        // roiDrawView: her zaman dokunulamaz, sadece visibility degistir
+        // roiDrawView: flaglara dokunma, sadece visibility + updateViewLayout
         roiDrawView?.let { v ->
             v.visibility = android.view.View.VISIBLE
             v.alpha = 1f
+            roiDrawParams?.let { lp -> runCatching { windowManager.updateViewLayout(v, lp) } }
         }
         applyOverlayState(bubbleView, bubbleParams, true, true)
     }
