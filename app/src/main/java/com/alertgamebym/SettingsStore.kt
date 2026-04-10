@@ -55,6 +55,19 @@ object SettingsStore {
             .edit().putLong(KEY_WAIT_MS, value.coerceIn(5000L, 120000L)).apply()
     }
 
+    // Item bekleme: kirmizi var + item yok -> bekleme (0-60sn, varsayilan 10sn)
+    private const val KEY_ITEM_WAIT_MS = "item_wait_ms"
+
+    fun getItemWaitMs(context: Context): Long {
+        return context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getLong(KEY_ITEM_WAIT_MS, 10000L).coerceIn(0L, 60000L)
+    }
+
+    fun saveItemWaitMs(context: Context, value: Long) {
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .edit().putLong(KEY_ITEM_WAIT_MS, value.coerceIn(0L, 60000L)).apply()
+    }
+
     // Tum ROI yazilarina tikla (true) veya sadece eslesen iteme (false)
     private const val KEY_TAP_ALL = "tap_all_items"
 

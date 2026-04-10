@@ -92,6 +92,7 @@ private fun MainScreen() {
     var tapOffsetXText by remember { mutableStateOf(SettingsStore.getTapOffsetX(context).toString()) }
     var tapOffsetYText by remember { mutableStateOf(SettingsStore.getTapOffsetY(context).toString()) }
     var tapAllMode by remember { mutableStateOf(SettingsStore.getTapAll(context)) }
+    var itemWaitSecText by remember { mutableStateOf((SettingsStore.getItemWaitMs(context) / 1000L).toString()) }
 
     val projectionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -306,6 +307,12 @@ private fun MainScreen() {
 
 
         // Tikla modu: Tek item (eslesen) veya Tum ROI
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Text("Item Bekleme: ${itemWaitSecText}sn (0-60)", modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = { val v=(itemWaitSecText.toLongOrNull()?:10L)-1L; itemWaitSecText=v.coerceIn(0L,60L).toString(); SettingsStore.saveItemWaitMs(context,itemWaitSecText.toLong()*1000L) }) { Text("-") }
+            OutlinedButton(onClick = { val v=(itemWaitSecText.toLongOrNull()?:10L)+1L; itemWaitSecText=v.coerceIn(0L,60L).toString(); SettingsStore.saveItemWaitMs(context,itemWaitSecText.toLong()*1000L) }) { Text("+") }
+        }
+
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Text(if (tapAllMode) "Mod: Tüm ROI yazıları" else "Mod: Eşleşen item", modifier = Modifier.weight(1f))
             OutlinedButton(onClick = {
