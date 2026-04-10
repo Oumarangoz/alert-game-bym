@@ -74,7 +74,6 @@ class BubbleOverlayService : Service() {
     @Volatile private var itemMissCount = 0
     @Volatile private var state2MissCount = 0
     @Volatile private var itemWaitStartedAt = 0L
-    @Volatile private var itemWaitStartedAt = 0L
 
  // Phase bazli antispam - STATE1/STATE2 birbirini engellemez
  private val phaseTapX = java.util.concurrent.ConcurrentHashMap<String, Float>()
