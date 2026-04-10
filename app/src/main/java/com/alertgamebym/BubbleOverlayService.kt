@@ -301,7 +301,7 @@ class BubbleOverlayService : Service() {
                     }
 
                     AutoPhase.TAP_ITEM -> {
-                        // Item yazisina araliksiz tikla
+                        // Item yazisina 15ms arayla surekli tikla
                         val foundQuery = performItemOcrTap(
                             itemQueries = items,
                             logPrefix = "AUTO-I",
@@ -311,26 +311,17 @@ class BubbleOverlayService : Service() {
                             tapAll = tapAll
                         )
                         if (foundQuery != null) {
-                            // Bulundu - araliksiz tikla, yazı silinene kadar devam
-                            AppLog.add("AUTO-I: ITEM -> '$foundQuery' tikliyorum")
+                            // Bulundu - 15ms arayla araliksiz tikla
                             itemMissCount = 0
-                            // delay yok - hemen tekrar OCR
+                            delay(15)
                         } else {
                             itemMissCount += 1
                             if (itemMissCount >= 3) {
-                                // 3 kez bulunamadi = yazi silindi
-                                AppLog.add("AUTO-I: yazi silindi, 15sn sonra kirmiziya tikla")
+                                // Yazi silindi -> 5ms bekle -> FIND_STATE2
+                                AppLog.add("AUTO-I: yazi silindi -> FIND_STATE2")
                                 itemMissCount = 0
-                                delay(15000)
-                                performSingleRefTap(
-                                    key = ReferenceStore.KEY_STATE1,
-                                    label = "STATE1",
-                                    logPrefix = "AUTO-R",
-                                    silentNoMatch = false,
-                                    minConf = minConf,
-                                    cachedUri = cachedRef1
-                                )
-                                AppLog.add("AUTO-R: 15sn kirmizi tiklandi")
+                                delay(5)
+                                autoPhase = AutoPhase.FIND_STATE2
                             }
                             // delay yok - hemen tekrar
                         }
