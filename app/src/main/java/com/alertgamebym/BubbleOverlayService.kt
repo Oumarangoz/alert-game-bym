@@ -263,12 +263,26 @@ class BubbleOverlayService : Service() {
                         } else false
 
                         if (!kirmizi) {
-                            AppLog.add("DEBUG: kirmizi yok, ref1=${ref1 != null} roiX=$roiX roiY=$roiY")
-                            delay(400) // CPU yormasin
+                            itemWaitStartedAt = 0L
+                            delay(400)
                         } else {
-                            // Kirmizi var - direkt tikla
-                            AppLog.add("AUTO: KIRMIZI bulundu -> tikliyorum")
-                            autoPhase = AutoPhase.TAP_RED
+                            val x1=ControlCenter.itemRoiX1.value.toInt(); val y1=ControlCenter.itemRoiY1.value.toInt()
+                            val x2=ControlCenter.itemRoiX2.value.toInt(); val y2=ControlCenter.itemRoiY2.value.toInt()
+                            withContext(Dispatchers.Main) { hideTransientOverlaysKeepBubble() }
+                            delay(150)
+                            val lines=withContext(Dispatchers.IO) { OcrDebugScanner.scanRegion(this@BubbleOverlayService,x1,y1,x2,y2) }
+                            withContext(Dispatchers.Main) { restoreTransientOverlaysKeepBubble(); refreshBubble() }
+                            val itemFound=lines.any { line -> items.any { q -> line.text.lowercase().contains(q.lowercase()) } }
+                            if (itemFound) {
+                                AppLog.add("AUTO: KIRMIZI+ITEM -> kirmiziya tikla")
+                                itemWaitStartedAt=0L
+                                autoPhase=AutoPhase.TAP_RED
+                            } else {
+                                if (itemWaitStartedAt==0L) itemWaitStartedAt=SystemClock.uptimeMillis()
+                                val waited=SystemClock.uptimeMillis()-itemWaitStartedAt
+                                if (itemWaitMs>0L && waited<itemWaitMs) { delay(300) }
+                                else { itemWaitStartedAt=0L; delay(300) }
+                            }
                         }
                     }
 
